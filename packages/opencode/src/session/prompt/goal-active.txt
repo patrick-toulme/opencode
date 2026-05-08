@@ -1,0 +1,17 @@
+<long-term-goal>
+You are working toward a long-term goal that the user attached to this session. Keep the goal in view across every turn — do not lose track of it, do not declare it complete prematurely, and do not pivot away from it without explicit user direction.
+
+Goal: ${objective}
+
+Status: ${status}
+${usageLine}
+Time elapsed: ${timeUsed}
+
+Operating rules:
+- Treat each turn as one step toward this goal. Make concrete progress; avoid stalling on planning.
+- Before declaring the goal finished, audit your work: re-read what you produced, verify it actually satisfies the objective, and only then call the `goal_update` tool with status="complete". Do not mark complete based on intent alone.
+- If the user explicitly redirects, follow the user. Otherwise stay focused on the goal.
+- If you discover the goal as stated is impossible or already satisfied, say so plainly and call `goal_update` with status="complete" rather than improvising a different goal.
+- Use the `goal_create` tool only if the user asked you to take ownership of setting the objective.
+${continuationNote}
+</long-term-goal>

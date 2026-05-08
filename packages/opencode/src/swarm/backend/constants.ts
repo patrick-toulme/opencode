@@ -1,0 +1,7 @@
+export const TMUX_COMMAND = "tmux"
+export const IT2_COMMAND = "it2"
+export const SWARM_SESSION_NAME = "opencode-swarm"
+export const SWARM_WINDOW_NAME = "agents"
+export const HIDDEN_SESSION_NAME = "opencode-swarm-hidden"
+export const WORKER_COMMAND_ENV = "OPENCODE_SWARM_WORKER_COMMAND"
+export const BACKEND_ENV = "OPENCODE_SWARM_BACKEND"

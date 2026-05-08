@@ -131,6 +131,11 @@ export interface Interface {
   readonly ask: (input: AskInput) => Effect.Effect<void, Error>
   readonly reply: (input: ReplyInput) => Effect.Effect<void>
   readonly list: () => Effect.Effect<ReadonlyArray<Request>>
+  readonly check: (input: {
+    permission: string
+    patterns: readonly string[]
+    ruleset: Ruleset
+  }) => Effect.Effect<"allow" | "ask", DeniedError>
 }
 
 interface PendingEntry {
@@ -176,24 +181,34 @@ export const layer = Layer.effect(
       }),
     )
 
-    const ask = Effect.fn("Permission.ask")(function* (input: AskInput) {
-      const { approved, pending } = yield* InstanceState.get(state)
-      const { ruleset, ...request } = input
+    const check: Interface["check"] = Effect.fn("Permission.check")(function* (input) {
+      const { approved } = yield* InstanceState.get(state)
       let needsAsk = false
 
-      for (const pattern of request.patterns) {
-        const rule = evaluate(request.permission, pattern, ruleset, approved)
-        log.info("evaluated", { permission: request.permission, pattern, action: rule })
+      for (const pattern of input.patterns) {
+        const rule = evaluate(input.permission, pattern, input.ruleset, approved)
+        log.info("evaluated", { permission: input.permission, pattern, action: rule })
         if (rule.action === "deny") {
           return yield* new DeniedError({
-            ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
+            ruleset: input.ruleset.filter((rule) => Wildcard.match(input.permission, rule.permission)),
           })
         }
         if (rule.action === "allow") continue
         needsAsk = true
       }
 
-      if (!needsAsk) return
+      return needsAsk ? "ask" : "allow"
+    })
+
+    const ask = Effect.fn("Permission.ask")(function* (input: AskInput) {
+      const { pending } = yield* InstanceState.get(state)
+      const { ruleset, ...request } = input
+      const decision = yield* check({
+        permission: request.permission,
+        patterns: request.patterns,
+        ruleset,
+      })
+      if (decision === "allow") return
 
       const id = request.id ?? PermissionID.ascending()
       const info = Schema.decodeUnknownSync(Request)({
@@ -276,7 +291,7 @@ export const layer = Layer.effect(
       return Array.from(pending.values(), (item) => item.info)
     })
 
-    return Service.of({ ask, reply, list })
+    return Service.of({ ask, reply, list, check })
   }),
 )
 

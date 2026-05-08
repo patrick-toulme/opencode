@@ -56,6 +56,16 @@ export const Info = z
 export type Info = z.infer<typeof Info>
 
 export const USER_AGENT = `opencode/${InstallationChannel}/${InstallationVersion}/${Flag.OPENCODE_CLIENT}`
+export const OpenCodeMAXChannel = "opencodemax"
+export const OpenCodeMAXUpdateCommand =
+  "curl -fsSL https://github.com/patrick-toulme/opencode/releases/latest/download/install.sh | bash"
+export const OpenCodeMAXUpgradeMessage =
+  "OpenCodeMAX does not use the built-in OpenCode updater. Update it from GitHub Releases with: " +
+  OpenCodeMAXUpdateCommand
+
+export function isOpenCodeMAX() {
+  return InstallationChannel === OpenCodeMAXChannel
+}
 
 export function isPreview() {
   return InstallationChannel !== "latest"

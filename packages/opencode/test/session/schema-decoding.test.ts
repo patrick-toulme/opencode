@@ -283,6 +283,8 @@ describe("SessionPrompt input schemas", () => {
     const decode = decodeUnknown(SessionPrompt.PromptInput)
     const expected = {
       sessionID,
+      tools: { bash: false },
+      persistToolPermissions: false,
       parts: [
         { type: "text" as const, text: "hello" },
         { type: "file" as const, mime: "image/png", url: "data:image/png;base64,AAAA" },
@@ -293,9 +295,11 @@ describe("SessionPrompt input schemas", () => {
     expect(decoded.parts).toHaveLength(2)
     expect(decoded.parts[0]).toMatchObject({ type: "text", text: "hello" })
     expect(decoded.parts[1]).toMatchObject({ type: "file", mime: "image/png" })
+    expect(decoded.persistToolPermissions).toBe(false)
 
     const viaZod = SessionPrompt.PromptInput.zod.parse(input)
     expect(viaZod.parts).toHaveLength(2)
+    expect(viaZod.persistToolPermissions).toBe(false)
   })
 
   test("PromptInput rejects unknown part type", () => {

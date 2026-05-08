@@ -278,6 +278,99 @@ export interface Hooks {
       metadata: any
     },
   ) => Promise<void>
+  /**
+   * Called before a subagent starts its first turn.
+   *
+   * Push strings into `output.additionalContexts` or set
+   * `output.additionalContext` to insert hook-provided context into the
+   * subagent session before its assignment prompt.
+   */
+  "swarm.subagent.start"?: (
+    input: {
+      workerID: string
+      sessionID: string
+      parentSessionID: string
+      agentType: string
+      description: string
+      prompt: string
+      teammateName?: string
+      teamName?: string
+      background: boolean
+    },
+    output: { additionalContexts: string[]; additionalContext?: string },
+  ) => Promise<void>
+  /**
+   * Called when a subagent is about to stop.
+   *
+   * Set `output.continue = false` and `output.message` to block a completed
+   * foreground subagent from stopping and feed the message back as another
+   * subagent turn. Terminal background exits still report the hook input, but
+   * regular persistent teammate idling is handled by `swarm.teammate.idle`.
+   */
+  "swarm.subagent.stop"?: (
+    input: {
+      workerID: string
+      sessionID: string
+      parentSessionID: string
+      agentType: string
+      status: "completed" | "cancelled" | "failed"
+      stopHookActive: boolean
+      transcriptPath: string
+      lastAssistantMessage?: string
+      teammateName?: string
+      teamName?: string
+    },
+    output: { continue: boolean; message?: string },
+  ) => Promise<void>
+  /**
+   * Called before a persistent background subagent transitions to idle.
+   *
+   * Set `output.continue = false` and `output.message` to feed the message back
+   * to the subagent as a new turn instead of letting it idle.
+   */
+  "swarm.teammate.idle"?: (
+    input: {
+      workerID: string
+      sessionID: string
+      parentSessionID: string
+      teammateName?: string
+      teamName?: string
+      summary?: string
+    },
+    output: { continue: boolean; message?: string },
+  ) => Promise<void>
+  /**
+   * Called after a shared swarm task is created.
+   *
+   * Set `output.allow = false` and `output.message` to reject the task. The
+   * task will be removed and feedback returned to the model.
+   */
+  "swarm.task.created"?: (
+    input: {
+      taskID: string
+      taskSubject: string
+      taskDescription?: string
+      teammateName?: string
+      teamName?: string
+    },
+    output: { allow: boolean; message?: string },
+  ) => Promise<void>
+  /**
+   * Called before a shared swarm task is marked completed.
+   *
+   * Set `output.allow = false` and `output.message` to block completion and
+   * return feedback to the model that attempted the update.
+   */
+  "swarm.task.completed"?: (
+    input: {
+      taskID: string
+      taskSubject: string
+      taskDescription?: string
+      teammateName?: string
+      teamName?: string
+    },
+    output: { allow: boolean; message?: string },
+  ) => Promise<void>
   "experimental.chat.messages.transform"?: (
     input: {},
     output: {

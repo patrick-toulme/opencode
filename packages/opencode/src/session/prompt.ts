@@ -37,6 +37,7 @@ import { NamedError } from "@opencode-ai/core/util/error"
 import { SessionProcessor } from "./processor"
 import { Tool } from "@/tool/tool"
 import { Permission } from "@/permission"
+import { PermissionID } from "@/permission/schema"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { Shell } from "@/shell/shell"
@@ -51,7 +52,13 @@ import { withStatics } from "@/util/schema"
 import * as EffectLogger from "@opencode-ai/core/effect/logger"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
+import { SwarmRuntime } from "@/swarm/runtime"
+import { ScheduledTask } from "@/schedule/runtime"
+import { AgentMemory } from "@/memory/agent"
+import { TeamMemory } from "@/memory/team"
+import type { WorkerSnapshot } from "@/swarm/state"
 import { SessionRunState } from "./run-state"
+import * as Goal from "./goal"
 import { EffectBridge } from "@/effect/bridge"
 import { EventV2 } from "@/v2/event"
 import { SessionEvent } from "@/v2/session-event"
@@ -378,6 +385,77 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const tools: Record<string, AITool> = {}
       const run = yield* runner()
       const promptOps = yield* ops()
+      const swarm = Option.getOrUndefined(yield* Effect.serviceOption(SwarmRuntime.Service))
+      const worker = swarm ? yield* swarm.getBySession(input.session.id) : undefined
+      const workerID = worker?.spec.workerID
+
+      const updateWorkerTool = (tool: { name: string; title?: string } | undefined) =>
+        swarm && workerID ? swarm.updateCurrentTool(workerID, tool) : Effect.void
+
+      const markWorkerPermission = (permissionID: PermissionID) =>
+        swarm && workerID ? swarm.markPermissionPending(workerID, permissionID as unknown as string) : Effect.void
+
+      const clearWorkerPermission = (permissionID: PermissionID) =>
+        swarm && workerID ? swarm.clearPermissionPending(workerID, permissionID as unknown as string) : Effect.void
+
+      const notifyWorkerPermission = (
+        permissionID: PermissionID,
+        req: Omit<Permission.Request, "id" | "sessionID" | "tool">,
+        toolUseID: string,
+      ) =>
+        worker && worker.spec.permissionStrategy === "bubble"
+          ? Effect.gen(function* () {
+              const from = worker.spec.name ?? worker.spec.workerID
+              const messageID = MessageID.ascending()
+              const request = {
+                type: "permission_request",
+                request_id: permissionID,
+                agent_id: from,
+                tool_name: req.permission,
+                tool_use_id: toolUseID,
+                description: req.patterns.join(", "),
+                input: req.metadata,
+                permission_suggestions: req.always,
+              }
+              yield* sessions.updateMessage({
+                id: messageID,
+                role: "user",
+                sessionID: worker.spec.parentSessionID,
+                agent: worker.spec.agent,
+                model: {
+                  providerID: input.model.providerID,
+                  modelID: input.model.id,
+                },
+                time: { created: Date.now() },
+              })
+              yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID,
+                sessionID: worker.spec.parentSessionID,
+                type: "text",
+                synthetic: true,
+                metadata: {
+                  kind: "swarm-message",
+                  from,
+                  workerID: worker.spec.workerID,
+                  ...(worker.spec.team ? { team: worker.spec.team } : {}),
+                  summary: "permission request",
+                  permissionID,
+                },
+                text: [
+                  "<teammate-message>",
+                  `<from>${xmlEscape(from)}</from>`,
+                  `<worker-id>${xmlEscape(worker.spec.workerID)}</worker-id>`,
+                  worker.spec.team ? `<team>${xmlEscape(worker.spec.team)}</team>` : "",
+                  "<summary>permission request</summary>",
+                  `<message>${xmlEscape(JSON.stringify(request))}</message>`,
+                  "</teammate-message>",
+                ]
+                  .filter((line) => line !== "")
+                  .join("\n"),
+              } satisfies MessageV2.TextPart)
+            })
+          : Effect.void
 
       const context = (args: any, options: ToolExecutionOptions): Tool.Context => ({
         sessionID: input.session.id,
@@ -402,14 +480,39 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }
           }),
         ask: (req) =>
-          permission
-            .ask({
-              ...req,
-              sessionID: input.session.id,
-              tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-              ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
-            })
-            .pipe(Effect.orDie),
+          Effect.gen(function* () {
+            const permissionID = workerID ? PermissionID.ascending() : undefined
+            const ruleset = Permission.merge(input.agent.permission, input.session.permission ?? [])
+            if (permissionID) {
+              const decision = yield* permission.check({
+                permission: req.permission,
+                patterns: req.patterns,
+                ruleset,
+              }).pipe(Effect.orDie)
+              if (decision === "ask") {
+                yield* markWorkerPermission(permissionID)
+                yield* notifyWorkerPermission(permissionID, req, options.toolCallId)
+              }
+            }
+            yield* permission
+              .ask({
+                ...req,
+                ...(permissionID ? { id: permissionID } : {}),
+                sessionID:
+                  worker?.spec.permissionStrategy === "bubble" ? worker.spec.parentSessionID : input.session.id,
+                tool: { messageID: input.processor.message.id, callID: options.toolCallId },
+                metadata: worker
+                  ? {
+                      ...req.metadata,
+                      workerID: worker.spec.workerID,
+                      workerSessionID: worker.spec.sessionID,
+                      workerAgent: worker.spec.agent,
+                    }
+                  : req.metadata,
+                ruleset,
+              })
+              .pipe(Effect.ensuring(permissionID ? clearWorkerPermission(permissionID) : Effect.void), Effect.orDie)
+          }),
       })
 
       for (const item of yield* registry.tools({
@@ -418,41 +521,48 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         agent: input.agent,
       })) {
         const schema = ProviderTransform.schema(input.model, EffectZod.toJsonSchema(item.parameters))
-        tools[item.id] = tool({
+        const modelTool = tool({
           description: item.description,
           inputSchema: jsonSchema(schema),
           execute(args, options) {
             return run.promise(
               Effect.gen(function* () {
                 const ctx = context(args, options)
-                yield* plugin.trigger(
-                  "tool.execute.before",
-                  { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
-                  { args },
-                )
-                const result = yield* item.execute(args, ctx)
-                const output = {
-                  ...result,
-                  attachments: result.attachments?.map((attachment) => ({
-                    ...attachment,
-                    id: PartID.ascending(),
-                    sessionID: ctx.sessionID,
-                    messageID: input.processor.message.id,
-                  })),
-                }
-                yield* plugin.trigger(
-                  "tool.execute.after",
-                  { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
-                  output,
-                )
-                if (options.abortSignal?.aborted) {
-                  yield* input.processor.completeToolCall(options.toolCallId, output)
-                }
-                return output
+                yield* updateWorkerTool({ name: item.id })
+                return yield* Effect.gen(function* () {
+                  yield* plugin.trigger(
+                    "tool.execute.before",
+                    { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
+                    { args },
+                  )
+                  const result = yield* item.execute(args, ctx)
+                  const output = {
+                    ...result,
+                    attachments: result.attachments?.map((attachment) => ({
+                      ...attachment,
+                      id: PartID.ascending(),
+                      sessionID: ctx.sessionID,
+                      messageID: input.processor.message.id,
+                    })),
+                  }
+                  yield* plugin.trigger(
+                    "tool.execute.after",
+                    { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args },
+                    output,
+                  )
+                  if (options.abortSignal?.aborted) {
+                    yield* input.processor.completeToolCall(options.toolCallId, output)
+                  }
+                  return output
+                }).pipe(Effect.ensuring(updateWorkerTool(undefined)))
               }),
             )
           },
         })
+        tools[item.id] = modelTool
+        for (const alias of LLM.compatibleToolAliasesFor(item.id)) {
+          if (!tools[alias]) tools[alias] = modelTool
+        }
       }
 
       for (const [key, item] of Object.entries(yield* mcp.tools())) {
@@ -466,77 +576,80 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           run.promise(
             Effect.gen(function* () {
               const ctx = context(args, opts)
-              yield* plugin.trigger(
-                "tool.execute.before",
-                { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId },
-                { args },
-              )
-              const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.gen(function* () {
-                yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
-                return yield* Effect.promise(() => execute(args, opts))
-              }).pipe(
-                Effect.withSpan("Tool.execute", {
-                  attributes: {
-                    "tool.name": key,
-                    "tool.call_id": opts.toolCallId,
-                    "session.id": ctx.sessionID,
-                    "message.id": input.processor.message.id,
-                  },
-                }),
-              )
-              yield* plugin.trigger(
-                "tool.execute.after",
-                { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId, args },
-                result,
-              )
+              yield* updateWorkerTool({ name: key })
+              return yield* Effect.gen(function* () {
+                yield* plugin.trigger(
+                  "tool.execute.before",
+                  { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId },
+                  { args },
+                )
+                const result: Awaited<ReturnType<NonNullable<typeof execute>>> = yield* Effect.gen(function* () {
+                  yield* ctx.ask({ permission: key, metadata: {}, patterns: ["*"], always: ["*"] })
+                  return yield* Effect.promise(() => execute(args, opts))
+                }).pipe(
+                  Effect.withSpan("Tool.execute", {
+                    attributes: {
+                      "tool.name": key,
+                      "tool.call_id": opts.toolCallId,
+                      "session.id": ctx.sessionID,
+                      "message.id": input.processor.message.id,
+                    },
+                  }),
+                )
+                yield* plugin.trigger(
+                  "tool.execute.after",
+                  { tool: key, sessionID: ctx.sessionID, callID: opts.toolCallId, args },
+                  result,
+                )
 
-              const textParts: string[] = []
-              const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []
-              for (const contentItem of result.content) {
-                if (contentItem.type === "text") textParts.push(contentItem.text)
-                else if (contentItem.type === "image") {
-                  attachments.push({
-                    type: "file",
-                    mime: contentItem.mimeType,
-                    url: `data:${contentItem.mimeType};base64,${contentItem.data}`,
-                  })
-                } else if (contentItem.type === "resource") {
-                  const { resource } = contentItem
-                  if (resource.text) textParts.push(resource.text)
-                  if (resource.blob) {
+                const textParts: string[] = []
+                const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []
+                for (const contentItem of result.content) {
+                  if (contentItem.type === "text") textParts.push(contentItem.text)
+                  else if (contentItem.type === "image") {
                     attachments.push({
                       type: "file",
-                      mime: resource.mimeType ?? "application/octet-stream",
-                      url: `data:${resource.mimeType ?? "application/octet-stream"};base64,${resource.blob}`,
-                      filename: resource.uri,
+                      mime: contentItem.mimeType,
+                      url: `data:${contentItem.mimeType};base64,${contentItem.data}`,
                     })
+                  } else if (contentItem.type === "resource") {
+                    const { resource } = contentItem
+                    if (resource.text) textParts.push(resource.text)
+                    if (resource.blob) {
+                      attachments.push({
+                        type: "file",
+                        mime: resource.mimeType ?? "application/octet-stream",
+                        url: `data:${resource.mimeType ?? "application/octet-stream"};base64,${resource.blob}`,
+                        filename: resource.uri,
+                      })
+                    }
                   }
                 }
-              }
 
-              const truncated = yield* truncate.output(textParts.join("\n\n"), {}, input.agent)
-              const metadata = {
-                ...result.metadata,
-                truncated: truncated.truncated,
-                ...(truncated.truncated && { outputPath: truncated.outputPath }),
-              }
+                const truncated = yield* truncate.output(textParts.join("\n\n"), {}, input.agent)
+                const metadata = {
+                  ...result.metadata,
+                  truncated: truncated.truncated,
+                  ...(truncated.truncated && { outputPath: truncated.outputPath }),
+                }
 
-              const output = {
-                title: "",
-                metadata,
-                output: truncated.content,
-                attachments: attachments.map((attachment) => ({
-                  ...attachment,
-                  id: PartID.ascending(),
-                  sessionID: ctx.sessionID,
-                  messageID: input.processor.message.id,
-                })),
-                content: result.content,
-              }
-              if (opts.abortSignal?.aborted) {
-                yield* input.processor.completeToolCall(opts.toolCallId, output)
-              }
-              return output
+                const output = {
+                  title: "",
+                  metadata,
+                  output: truncated.content,
+                  attachments: attachments.map((attachment) => ({
+                    ...attachment,
+                    id: PartID.ascending(),
+                    sessionID: ctx.sessionID,
+                    messageID: input.processor.message.id,
+                  })),
+                  content: result.content,
+                }
+                if (opts.abortSignal?.aborted) {
+                  yield* input.processor.completeToolCall(opts.toolCallId, output)
+                }
+                return output
+              }).pipe(Effect.ensuring(updateWorkerTool(undefined)))
             }),
           )
         tools[key] = item
@@ -587,6 +700,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             description: task.description,
             subagent_type: task.agent,
             command: task.command,
+            run_in_background: false,
           },
           time: { start: Date.now() },
         },
@@ -596,6 +710,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         description: task.description,
         subagent_type: task.agent,
         command: task.command,
+        run_in_background: false,
       }
       yield* plugin.trigger(
         "tool.execute.before",
@@ -621,7 +736,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           sessionID,
           abort: taskAbort.signal,
           callID: part.callID,
-          extra: { bypassAgentCheck: true, promptOps },
+          extra: { bypassAgentCheck: true, promptOps, allowForegroundTask: true },
           messages: msgs,
           metadata: (val: { title?: string; metadata?: Record<string, any> }) =>
             Effect.gen(function* () {
@@ -642,6 +757,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         })
         .pipe(
           Effect.catchCause((cause) => {
+            if (Cause.hasInterrupts(cause)) return Effect.failCause(cause)
             const defect = Cause.squash(cause)
             error = defect instanceof Error ? defect : new Error(String(defect))
             log.error("subtask execution failed", { error, agent: task.agent, description: task.description })
@@ -1370,6 +1486,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(
       function* (input: PromptInput) {
+        yield* configureScheduledTasks().pipe(Effect.catchCause(() => Effect.void))
         const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
         yield* revert.cleanup(session)
         const message = yield* createUserMessage(input)
@@ -1379,15 +1496,90 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         for (const [t, enabled] of Object.entries(input.tools ?? {})) {
           permissions.push({ permission: t, action: enabled ? "allow" : "deny", pattern: "*" })
         }
-        if (permissions.length > 0) {
+        if (permissions.length > 0 && input.persistToolPermissions !== false) {
           session.permission = permissions
           yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
         }
 
         if (input.noReply === true) return message
-        return yield* loop({ sessionID: input.sessionID })
+        let result = yield* loop({ sessionID: input.sessionID })
+
+        // Goal autonomous continuation: after the user-triggered turn(s) finish,
+        // if a goal is still active, keep the conversation moving until the
+        // model marks it complete, hits the budget wrap-up, or stalls.
+        let iterations = 0
+        let budgetWrapUpDone = false
+        while (iterations < Goal.MAX_AUTONOMOUS_ITERATIONS) {
+          const fresh = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+          const goal = fresh.goal
+          if (!goal) break
+          if (goal.status === "complete" || goal.status === "paused") break
+          if (goal.status === "budget_limited" && budgetWrapUpDone) break
+
+          // No-op suppression — if the previous continuation iteration produced
+          // no tool activity, the model is just emitting filler. Pause so we
+          // don't spin forever on text-only replies.
+          if (iterations > 0) {
+            const last = result
+            const hadAutonomousActivity = last.parts.some(
+              (p) => (p.type === "tool" && !p.metadata?.providerExecuted) || p.type === "subtask",
+            )
+            if (!hadAutonomousActivity) {
+              yield* sessions
+                .updateGoalStatus({ sessionID: input.sessionID, status: "paused" })
+                .pipe(Effect.catch(() => Effect.void))
+              break
+            }
+          }
+
+          if (goal.status === "budget_limited") budgetWrapUpDone = true
+
+          const continuationText =
+            goal.status === "budget_limited"
+              ? "Autonomous token budget exceeded. Wrap up: summarize what's done and what's left, hand control back to the user, do not start new work."
+              : 'Continue working toward the long-term goal. Make tangible progress this turn, or call goal_update with status="complete" if it\'s actually finished.'
+
+          yield* createUserMessage({
+            sessionID: input.sessionID,
+            messageID: undefined,
+            model: input.model,
+            agent: input.agent,
+            variant: input.variant,
+            parts: [
+              {
+                id: PartID.ascending(),
+                type: "text",
+                text: continuationText,
+                synthetic: true,
+                metadata: { kind: "goal_continuation" },
+              },
+            ],
+          })
+          iterations++
+          result = yield* loop({ sessionID: input.sessionID })
+        }
+
+        return result
       },
     )
+
+    const configureScheduledTasks = Effect.fn("SessionPrompt.configureScheduledTasks")(function* () {
+      const scheduled = Option.getOrUndefined(yield* Effect.serviceOption(ScheduledTask.Service))
+      if (!scheduled) return
+      const bridge = yield* EffectBridge.make()
+      yield* scheduled.configureRunner((task) =>
+        Effect.sync(() => {
+          bridge.fork(
+            prompt({
+              sessionID: task.sessionID,
+              agent: task.agent,
+              parts: [{ type: "text", text: ScheduledTask.renderFirePrompt(task), synthetic: true }],
+            }).pipe(Effect.asVoid, Effect.catchCause(() => Effect.void)),
+          )
+        }),
+      )
+      yield* scheduled.ensureStarted()
+    })
 
     const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
       const match = yield* sessions.findMessage(sessionID, (m) => m.info.role !== "user")
@@ -1395,6 +1587,177 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const msgs = yield* sessions.messages({ sessionID, limit: 1 })
       if (msgs.length > 0) return msgs[0]
       throw new Error("Impossible")
+    })
+
+    const renderSwarmContext = Effect.fn("SessionPrompt.renderSwarmContext")(function* (sessionID: SessionID) {
+      const swarm = Option.getOrUndefined(yield* Effect.serviceOption(SwarmRuntime.Service))
+      if (!swarm) return undefined
+      const scheduled = Option.getOrUndefined(yield* Effect.serviceOption(ScheduledTask.Service))
+
+      const currentWorker = yield* swarm.getBySession(sessionID)
+      const parentSessionID = currentWorker?.spec.parentSessionID ?? sessionID
+      const allWorkers = yield* swarm.list(parentSessionID)
+      const workers = allWorkers.filter((worker) =>
+        ["queued", "booting", "running", "waiting_permission", "waiting_input", "idle"].includes(worker.status),
+      )
+      const stoppedWorkers = allWorkers
+        .filter((worker) => ["completed", "cancelled", "failed", "interrupted"].includes(worker.status))
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+      const teams = yield* swarm.listTeams(parentSessionID)
+      const boards: Array<{ parentSessionID: SessionID; team?: string }> = [
+        { parentSessionID },
+        ...teams.map((team) => ({ parentSessionID, team: team.name })),
+      ]
+      const taskLists = yield* Effect.forEach(boards, (board) =>
+        swarm.listTeamTasks(board).pipe(Effect.map((tasks) => ({ board, tasks }))),
+      )
+      const tasks = taskLists.flatMap((item) =>
+        item.tasks
+          .filter((task) => task.status !== "completed")
+          .slice(0, 8)
+          .map((task) => ({ ...task, boardTeam: item.board.team })),
+      )
+      const scheduledTasks = scheduled
+        ? yield* scheduled.list(currentWorker ? { ownerWorkerID: currentWorker.spec.workerID } : { parentSessionID })
+        : []
+
+      if (
+        !currentWorker &&
+        workers.length === 0 &&
+        stoppedWorkers.length === 0 &&
+        tasks.length === 0 &&
+        teams.length === 0 &&
+        scheduledTasks.length === 0
+      )
+        return undefined
+
+      return [
+        "<swarm-runtime>",
+        "Live subagent coordination context. Use this to avoid duplicate work, route follow-ups, and continue useful parallelism.",
+        currentWorker
+          ? [
+              "<current-subagent>",
+              `<worker-id>${xmlEscape(currentWorker.spec.workerID)}</worker-id>`,
+              currentWorker.spec.name ? `<name>${xmlEscape(currentWorker.spec.name)}</name>` : "",
+              currentWorker.spec.team ? `<team>${xmlEscape(currentWorker.spec.team)}</team>` : "",
+              `<parent-session-id>${xmlEscape(currentWorker.spec.parentSessionID)}</parent-session-id>`,
+              `<status>${xmlEscape(currentWorker.status)}</status>`,
+              currentWorker.currentTool
+                ? `<current-tool>${xmlEscape(formatToolName(currentWorker.currentTool))}</current-tool>`
+                : "",
+              currentWorker.pendingPermissionID
+                ? `<pending-permission-id>${xmlEscape(currentWorker.pendingPermissionID)}</pending-permission-id>`
+                : "",
+              currentWorker.pendingPlanApprovalID
+                ? `<pending-plan-approval-id>${xmlEscape(currentWorker.pendingPlanApprovalID)}</pending-plan-approval-id>`
+                : "",
+              currentWorker.pendingShutdownID
+                ? `<pending-shutdown-id>${xmlEscape(currentWorker.pendingShutdownID)}</pending-shutdown-id>`
+                : "",
+              "</current-subagent>",
+            ]
+              .filter((line) => line !== "")
+              .join("\n")
+          : "",
+        workers.length
+          ? [
+              `<active-subagents count="${workers.length}">`,
+              ...workers.slice(0, 12).map((worker) =>
+                [
+                  "<subagent>",
+                  `<worker-id>${xmlEscape(worker.spec.workerID)}</worker-id>`,
+                  worker.spec.name ? `<name>${xmlEscape(worker.spec.name)}</name>` : "",
+                  worker.spec.team ? `<team>${xmlEscape(worker.spec.team)}</team>` : "",
+                  `<status>${xmlEscape(worker.status)}</status>`,
+                  worker.currentTool ? `<current-tool>${xmlEscape(formatToolName(worker.currentTool))}</current-tool>` : "",
+                  worker.pendingPermissionID
+                    ? `<pending-permission-id>${xmlEscape(worker.pendingPermissionID)}</pending-permission-id>`
+                    : "",
+                  worker.pendingPlanApprovalID
+                    ? `<pending-plan-approval-id>${xmlEscape(worker.pendingPlanApprovalID)}</pending-plan-approval-id>`
+                    : "",
+                  worker.pendingShutdownID ? `<pending-shutdown-id>${xmlEscape(worker.pendingShutdownID)}</pending-shutdown-id>` : "",
+                  `<description>${xmlEscape(worker.spec.description)}</description>`,
+                  worker.lastProgress ? `<last-progress>${xmlEscape(worker.lastProgress)}</last-progress>` : "",
+                  workerResultText(worker) ? `<last-result>${xmlEscape(workerResultText(worker))}</last-result>` : "",
+                  worker.mailboxSize ? `<mailbox-size>${worker.mailboxSize}</mailbox-size>` : "",
+                  "</subagent>",
+                ]
+                  .filter((line) => line !== "")
+                  .join("\n"),
+              ),
+              "</active-subagents>",
+            ].join("\n")
+          : "",
+        stoppedWorkers.length
+          ? [
+              `<stopped-subagents count="${stoppedWorkers.length}">`,
+              "Plain text sent with send_message resumes a stopped subagent on the same task session.",
+              ...stoppedWorkers.slice(0, 8).map((worker) =>
+                [
+                  "<subagent>",
+                  `<worker-id>${xmlEscape(worker.spec.workerID)}</worker-id>`,
+                  worker.spec.name ? `<name>${xmlEscape(worker.spec.name)}</name>` : "",
+                  worker.spec.team ? `<team>${xmlEscape(worker.spec.team)}</team>` : "",
+                  `<status>${xmlEscape(worker.status)}</status>`,
+                  `<description>${xmlEscape(worker.spec.description)}</description>`,
+                  workerResultText(worker) ? `<last-result>${xmlEscape(workerResultText(worker))}</last-result>` : "",
+                  "</subagent>",
+                ]
+                  .filter((line) => line !== "")
+                  .join("\n"),
+              ),
+              "</stopped-subagents>",
+            ].join("\n")
+          : "",
+        tasks.length
+          ? [
+              `<open-team-tasks count="${tasks.length}">`,
+              ...tasks.map((task) =>
+                [
+                  "<task>",
+                  `<task-id>${xmlEscape(task.id)}</task-id>`,
+                  (task.team ?? task.boardTeam) ? `<team>${xmlEscape(task.team ?? task.boardTeam!)}</team>` : "",
+                  `<status>${xmlEscape(task.status)}</status>`,
+                  task.owner ? `<owner>${xmlEscape(task.owner)}</owner>` : "",
+                  `<subject>${xmlEscape(task.subject)}</subject>`,
+                  task.activeForm ? `<active-form>${xmlEscape(task.activeForm)}</active-form>` : "",
+                  task.description ? `<description>${xmlEscape(task.description)}</description>` : "",
+                  task.blockedBy.length ? `<blocked-by>${task.blockedBy.map((id) => `#${xmlEscape(id)}`).join(", ")}</blocked-by>` : "",
+                  task.blocks.length ? `<blocks>${task.blocks.map((id) => `#${xmlEscape(id)}`).join(", ")}</blocks>` : "",
+                  "</task>",
+                ]
+                  .filter((line) => line !== "")
+                  .join("\n"),
+              ),
+              "</open-team-tasks>",
+            ].join("\n")
+          : "",
+        scheduledTasks.length
+          ? [
+              `<scheduled-tasks count="${scheduledTasks.length}">`,
+              ...scheduledTasks.slice(0, 8).map((task) =>
+                [
+                  "<scheduled-task>",
+                  `<id>${xmlEscape(task.id)}</id>`,
+                  `<cron>${xmlEscape(task.cron)}</cron>`,
+                  `<recurring>${task.recurring ? "true" : "false"}</recurring>`,
+                  `<durable>${task.durable ? "true" : "false"}</durable>`,
+                  task.targetWorkerID ? `<target-worker-id>${xmlEscape(task.targetWorkerID)}</target-worker-id>` : "",
+                  task.targetName ? `<target-name>${xmlEscape(task.targetName)}</target-name>` : "",
+                  `<prompt>${xmlEscape(task.prompt.length > 400 ? task.prompt.slice(0, 397) + "..." : task.prompt)}</prompt>`,
+                  "</scheduled-task>",
+                ]
+                  .filter((line) => line !== "")
+                  .join("\n"),
+              ),
+              "</scheduled-tasks>",
+            ].join("\n")
+          : "",
+        "</swarm-runtime>",
+      ]
+        .filter((line) => line !== "")
+        .join("\n")
     })
 
     const runLoop: (sessionID: SessionID) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.run")(
@@ -1414,11 +1777,21 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           let lastUser: MessageV2.User | undefined
           let lastAssistant: MessageV2.Assistant | undefined
           let lastFinished: MessageV2.Assistant | undefined
+          let lastUserIndex = -1
+          let lastAssistantIndex = -1
           let tasks: (MessageV2.CompactionPart | MessageV2.SubtaskPart)[] = []
           for (let i = msgs.length - 1; i >= 0; i--) {
             const msg = msgs[i]
-            if (!lastUser && msg.info.role === "user") lastUser = msg.info
-            if (!lastAssistant && msg.info.role === "assistant") lastAssistant = msg.info
+            const btwMarker =
+              msg.info.role === "user" && msg.parts.length > 0 && msg.parts.every((part) => part.type === "btw")
+            if (!lastUser && msg.info.role === "user" && !btwMarker) {
+              lastUser = msg.info
+              lastUserIndex = i
+            }
+            if (!lastAssistant && msg.info.role === "assistant") {
+              lastAssistant = msg.info
+              lastAssistantIndex = i
+            }
             if (!lastFinished && msg.info.role === "assistant" && msg.info.finish) lastFinished = msg.info
             if (lastUser && lastFinished) break
             const task = msg.parts.filter((part) => part.type === "compaction" || part.type === "subtask")
@@ -1441,7 +1814,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             lastAssistant?.finish &&
             !["tool-calls"].includes(lastAssistant.finish) &&
             !hasToolCalls &&
-            lastUser.id < lastAssistant.id
+            lastUserIndex < lastAssistantIndex
           ) {
             yield* slog.info("exiting loop")
             break
@@ -1572,6 +1945,30 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
             const system = [...env, ...instructions, ...(skills ? [skills] : [])]
+            const fresh = yield* sessions.get(sessionID).pipe(Effect.orDie)
+            if (fresh.goal && fresh.goal.status !== "complete" && fresh.goal.status !== "paused") {
+              const lastUserMsgFull = msgs.findLast((m) => m.info.id === lastUser.id)
+              const isContinuationTurn =
+                lastUserMsgFull?.parts.some(
+                  (p) =>
+                    p.type === "text" &&
+                    p.synthetic === true &&
+                    (p.metadata as { kind?: string } | undefined)?.kind === "goal_continuation",
+                ) ?? false
+              system.push(Goal.renderSystem(fresh.goal, { isContinuationTurn }))
+            }
+            const swarmContext = yield* renderSwarmContext(sessionID)
+            if (swarmContext) system.push(swarmContext)
+            const memory = Option.getOrUndefined(yield* Effect.serviceOption(AgentMemory.Service))
+            const memoryPrompt = memory
+              ? yield* memory.prompt(agent).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+              : undefined
+            if (memoryPrompt) system.push(memoryPrompt)
+            const teamMemory = Option.getOrUndefined(yield* Effect.serviceOption(TeamMemory.Service))
+            const teamMemoryPrompt = teamMemory
+              ? yield* teamMemory.prompt().pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+              : undefined
+            if (teamMemoryPrompt) system.push(teamMemoryPrompt)
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
             const result = yield* handle.process({
@@ -1586,6 +1983,15 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
             })
+
+            if (fresh.goal) {
+              const total = handle.message.tokens.total ?? 0
+              const elapsedMs =
+                handle.message.time?.completed && handle.message.time?.created
+                  ? handle.message.time.completed - handle.message.time.created
+                  : 0
+              yield* sessions.trackGoalUsage({ sessionID, tokens: total, timeMs: elapsedMs })
+            }
 
             if (structured !== undefined) {
               handle.message.structured = structured
@@ -1779,7 +2185,8 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(MCP.defaultLayer),
     Layer.provide(LSP.defaultLayer),
     Layer.provide(ToolRegistry.defaultLayer),
-    Layer.provide(Truncate.defaultLayer),
+    Layer.provide(ScheduledTask.defaultLayer),
+    Layer.provide(Layer.mergeAll(Truncate.defaultLayer, AgentMemory.defaultLayer, TeamMemory.defaultLayer)),
     Layer.provide(Provider.defaultLayer),
     Layer.provide(Config.defaultLayer),
     Layer.provide(Instruction.defaultLayer),
@@ -1814,6 +2221,10 @@ export const PromptInput = Schema.Struct({
     description:
       "@deprecated tools and permissions have been merged, you can set permissions on the session itself now",
   }),
+  persistToolPermissions: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "When false, tools only masks the current prompt turn and is not persisted as session permissions.",
+  }),
   format: Schema.optional(MessageV2.Format),
   system: Schema.optional(Schema.String),
   variant: Schema.optional(Schema.String),
@@ -1823,6 +2234,7 @@ export const PromptInput = Schema.Struct({
       MessageV2.FilePartInput,
       MessageV2.AgentPartInput,
       MessageV2.SubtaskPartInput,
+      MessageV2.BtwPartInput,
     ]).annotate({ discriminator: "type" }),
   ),
 }).pipe(withStatics((s) => ({ zod: zod(s) })))
@@ -1904,5 +2316,22 @@ const bashRegex = /!`([^`]+)`/g
 const argsRegex = /(?:\[Image\s+\d+\]|"[^"]*"|'[^']*'|[^\s"']+)/gi
 const placeholderRegex = /\$(\d+)/g
 const quoteTrimRegex = /^["']|["']$/g
+
+const workerResultText = (worker: WorkerSnapshot) => {
+  const text = (worker.result?.error ?? worker.result?.text ?? "").trim()
+  if (!text) return ""
+  return text.length > 800 ? text.slice(0, 800) + "\n[truncated]" : text
+}
+
+const formatToolName = (tool: { name: string; title?: string }) =>
+  [tool.name, tool.title].filter((value): value is string => Boolean(value?.trim())).join(": ")
+
+const xmlEscape = (value: string) =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;")
 
 export * as SessionPrompt from "./prompt"

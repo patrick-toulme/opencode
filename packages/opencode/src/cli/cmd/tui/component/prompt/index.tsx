@@ -599,6 +599,38 @@ export function Prompt(props: PromptProps) {
         },
       },
       {
+        title: "Btw",
+        desc: "Side thread that inherits this session's context, leaves the main thread untouched",
+        name: "session.btw",
+        category: "Session",
+        slashName: "btw",
+        suggested: route.data.type === "session",
+        run: () => {
+          input.setText("/btw ")
+          setStore("prompt", {
+            input: "/btw ",
+            parts: [],
+          })
+          input.gotoBufferEnd()
+        },
+      },
+      {
+        title: "Goal",
+        desc: "Set, clear, or update a long-term goal that the model is reminded of every turn",
+        name: "session.goal",
+        category: "Session",
+        slashName: "goal",
+        suggested: route.data.type === "session",
+        run: () => {
+          input.setText("/goal ")
+          setStore("prompt", {
+            input: "/goal ",
+            parts: [],
+          })
+          input.gotoBufferEnd()
+        },
+      },
+      {
         title: "Warp",
         desc: "Change the workspace for the session",
         name: "workspace.set",
@@ -1120,6 +1152,19 @@ export function Prompt(props: PromptProps) {
           ]
         : []
 
+    const btwParse = iife(() => {
+      if (!inputText.startsWith("/btw")) return undefined
+      const after = inputText.slice("/btw".length)
+      if (after && after[0] !== " " && after[0] !== "\n") return undefined
+      return after.trim()
+    })
+
+    const goalParse = iife(() => {
+      if (!inputText.startsWith("/goal")) return undefined
+      const after = inputText.slice("/goal".length)
+      if (after && after[0] !== " " && after[0] !== "\n") return undefined
+      return after.trim()
+    })
     if (store.mode === "shell") {
       void sdk.client.session.shell({
         sessionID,
@@ -1131,6 +1176,138 @@ export function Prompt(props: PromptProps) {
         command: inputText,
       })
       setStore("mode", "normal")
+    } else if (btwParse !== undefined && props.sessionID) {
+      const sourceID = props.sessionID
+      void (async () => {
+        const result = await sdk.client.session.btw({ sessionID: sourceID })
+        if (!result.data) {
+          toast.show({ message: "Failed to start /btw", variant: "error" })
+          return
+        }
+        const newID = result.data.id
+        const childMessages = await sdk.client.session
+          .messages({ sessionID: newID, limit: 1 })
+          .then((res) => res.data ?? [])
+          .catch(() => [])
+        const afterMessageID = childMessages.at(-1)?.info.id
+        const markerMessageID = MessageID.ascending()
+        const markerPartID = PartID.ascending()
+        const marker = await sdk.client.session.prompt({
+          sessionID: sourceID,
+          messageID: markerMessageID,
+          agent: agent.name,
+          model: selectedModel,
+          variant,
+          noReply: true,
+          parts: [
+            {
+              id: markerPartID,
+              type: "btw",
+              childSessionID: newID,
+              prompt: btwParse,
+              time: { created: Date.now() },
+              ...(afterMessageID ? { afterMessageID } : {}),
+            },
+          ],
+        })
+        if (marker.error) {
+          toast.show({ message: "Failed to show /btw inline", variant: "error" })
+          return
+        }
+        void sync.session.sync(newID).catch(() => {})
+        if (btwParse) {
+          const childMessageID = MessageID.ascending()
+          void sdk.client.session
+            .prompt({
+              sessionID: newID,
+              messageID: childMessageID,
+              agent: agent.name,
+              model: selectedModel,
+              variant,
+              parts: [
+                ...editorParts,
+                {
+                  id: PartID.ascending(),
+                  type: "text",
+                  text: btwParse,
+                },
+                ...nonTextParts.map(assign),
+              ],
+            })
+            .catch(() => toast.show({ message: "Failed to send /btw prompt", variant: "error" }))
+          if (editorParts.length > 0) editor.markSelectionSent()
+        }
+      })()
+    } else if (goalParse !== undefined && props.sessionID) {
+      const targetID = props.sessionID
+      const arg = goalParse
+      const refreshAndToast = (message: string, variant: "success" | "info" | "error" = "success") => {
+        toast.show({ message, variant, duration: 3000 })
+      }
+      if (arg === "") {
+        const current = sync.session.get(targetID)?.goal
+        if (!current) {
+          refreshAndToast("No goal set. Use `/goal <objective>` to attach one.", "info")
+        } else {
+          const meter = current.tokenBudget
+            ? ` · ${current.tokensUsed}/${current.tokenBudget} tokens`
+            : ` · ${current.tokensUsed} tokens used`
+          refreshAndToast(`Goal (${current.status}): ${current.objective}${meter}`, "info")
+        }
+      } else if (arg === "clear") {
+        void sdk.client.session.goal
+          .clear({ sessionID: targetID })
+          .then((res: { error?: unknown }) => {
+            if (res.error) refreshAndToast("Failed to clear goal", "error")
+            else refreshAndToast("Goal cleared")
+          })
+          .catch(() => refreshAndToast("Failed to clear goal", "error"))
+      } else if (arg === "pause" || arg === "resume" || arg === "complete") {
+        const status: "active" | "paused" | "complete" =
+          arg === "resume" ? "active" : arg === "pause" ? "paused" : "complete"
+        void sdk.client.session.goal
+          .update({ sessionID: targetID, status })
+          .then((res: { error?: unknown }) => {
+            if (res.error) refreshAndToast(`Failed to ${arg} goal`, "error")
+            else refreshAndToast(`Goal ${status}`)
+          })
+          .catch(() => refreshAndToast(`Failed to ${arg} goal`, "error"))
+      } else {
+        void sdk.client.session.goal
+          .set({ sessionID: targetID, objective: arg })
+          .then(async (res: { error?: unknown }) => {
+            if (res.error) {
+              refreshAndToast("Failed to set goal", "error")
+              return
+            }
+            refreshAndToast(`Goal set: ${arg}`)
+            const kickoff = await sdk.client.session
+              .prompt({
+                sessionID: targetID,
+                messageID: MessageID.ascending(),
+                agent: agent.name,
+                model: selectedModel,
+                variant,
+                parts: [
+                  {
+                    id: PartID.ascending(),
+                    type: "text",
+                    text: [
+                      "<system-reminder>",
+                      "The user attached a long-term goal to this session.",
+                      "Begin working toward it now. Make concrete progress or ask a concise clarifying question if needed.",
+                      "</system-reminder>",
+                    ].join("\n"),
+                    synthetic: true,
+                    metadata: { kind: "goal_start" },
+                  },
+                ],
+              })
+              .catch(() => undefined)
+            if (kickoff?.error) refreshAndToast("Goal set, but failed to start work", "error")
+          })
+          .catch(() => refreshAndToast("Failed to set goal", "error"))
+      }
     } else if (
       inputText.startsWith("/") &&
       iife(() => {

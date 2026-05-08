@@ -1,0 +1,140 @@
+name: OpenCodeMAX release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, without the opencodemax-v prefix"
+        required: true
+        type: string
+        default: "0.1.0-max.0"
+      prerelease:
+        description: "Mark the GitHub release as a prerelease"
+        required: true
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "opencodemax-v*"
+
+permissions:
+  contents: write
+
+concurrency: opencodemax-release-${{ github.ref }}
+
+jobs:
+  build-and-release:
+    name: Build and publish CLI release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#opencodemax-v}"
+            prerelease=false
+          else
+            version="${{ inputs.version }}"
+            prerelease="${{ inputs.prerelease }}"
+          fi
+
+          if [[ -z "${version}" ]]; then
+            echo "version is required" >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=opencodemax-v${version}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Build CLI binaries
+        working-directory: packages/opencode
+        env:
+          OPENCODE_VERSION: ${{ steps.meta.outputs.version }}
+          OPENCODE_CHANNEL: opencodemax
+        run: bun run build
+
+      - name: Package OpenCodeMAX release assets
+        working-directory: packages/opencode/dist
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          for dir in opencode-*; do
+            [[ -d "${dir}/bin" ]] || continue
+            target="${dir#opencode-}"
+            asset="OpenCodeMAX-${target}"
+
+            if [[ "${target}" == linux* ]]; then
+              tar -czf "${asset}.tar.gz" -C "${dir}/bin" .
+            else
+              (
+                cd "${dir}/bin"
+                zip -qr "../../${asset}.zip" .
+              )
+            fi
+          done
+
+          ls -lh OpenCodeMAX-*
+
+      - name: Package install script
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cp script/install-opencodemax.sh packages/opencode/dist/install.sh
+          sed -i "s/__OPENCODEMAX_TAG__/${{ steps.meta.outputs.tag }}/g" packages/opencode/dist/install.sh
+          chmod +x packages/opencode/dist/install.sh
+
+          cp .github/opencodemax-release-notes.md packages/opencode/dist/release-notes.md
+          sed -i "s/__OPENCODEMAX_TAG__/${{ steps.meta.outputs.tag }}/g" packages/opencode/dist/release-notes.md
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          args=(
+            "$TAG"
+            packages/opencode/dist/install.sh
+            packages/opencode/dist/OpenCodeMAX-*
+            --title "OpenCodeMAX ${VERSION}"
+            --target "$GITHUB_SHA"
+            --notes-file packages/opencode/dist/release-notes.md
+          )
+
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            edit_args=(
+              "$TAG"
+              --title "OpenCodeMAX ${VERSION}"
+              --target "$GITHUB_SHA"
+              --notes-file packages/opencode/dist/release-notes.md
+            )
+            if [[ "$PRERELEASE" == "false" ]]; then
+              edit_args+=(--latest)
+            fi
+            gh release edit "${edit_args[@]}"
+            gh release upload "$TAG" packages/opencode/dist/install.sh packages/opencode/dist/OpenCodeMAX-* --clobber
+          else
+            gh release create "${args[@]}"
+          fi

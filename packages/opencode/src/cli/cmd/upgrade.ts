@@ -25,6 +25,11 @@ export const UpgradeCommand = {
     UI.println(UI.logo("  "))
     UI.empty()
     prompts.intro("Upgrade")
+    if (Installation.isOpenCodeMAX()) {
+      prompts.log.warn(Installation.OpenCodeMAXUpgradeMessage)
+      prompts.outro("Done")
+      return
+    }
     const detectedMethod = await Installation.method()
     const method = (args.method as Installation.Method) ?? detectedMethod
     if (method === "unknown") {

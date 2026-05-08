@@ -60,6 +60,157 @@ Output: Creates directory 'foo'"
 }
 `;
 
+exports[`tool parameters JSON Schema (wire shape) broadcast 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "message": {
+      "description": "The message to send to every active subagent in the team.",
+      "type": "string",
+    },
+    "summary": {
+      "description": "A short 5-10 word summary of the broadcast for status displays.",
+      "type": "string",
+    },
+    "team": {
+      "description": "The target subagent team name.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "team",
+    "message",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) cancel_task 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "task_id": {
+      "description": "The target subagent worker_id, task_id/session_id, or launch name. Names are resolved within the current parent session first.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "task_id",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) control_task_pane 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "action": {
+      "description": "Pane visibility action. Use "hide" to detach the visible pane and "show" to rejoin it.",
+      "enum": [
+        "hide",
+        "show",
+      ],
+      "type": "string",
+    },
+    "task_id": {
+      "description": "The target subagent worker_id, task_id/session_id, or launch name. Names are resolved within the current parent session first.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "task_id",
+    "action",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) create_task 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "active_form": {
+      "description": "Present continuous form shown while in progress, e.g. "Running tests".",
+      "type": "string",
+    },
+    "description": {
+      "description": "Detailed requirements and context for the task.",
+      "type": "string",
+    },
+    "metadata": {
+      "additionalProperties": {},
+      "description": "Optional arbitrary metadata to attach to the task.",
+      "propertyNames": {
+        "type": "string",
+      },
+      "type": "object",
+    },
+    "owner": {
+      "description": "Optional worker/team member name to assign this task to.",
+      "type": "string",
+    },
+    "subject": {
+      "description": "Brief actionable task title.",
+      "type": "string",
+    },
+    "team": {
+      "description": "Optional team task list. Defaults to the current worker's team, the only active team, or this session.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "subject",
+    "description",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) create_team 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "agent_type": {
+      "description": "Type or role of the team lead for coordination metadata.",
+      "type": "string",
+    },
+    "description": {
+      "description": "Team description or purpose.",
+      "type": "string",
+    },
+    "team_name": {
+      "description": "Name for the new team to create.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "team_name",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) delete_team 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "cancel_workers": {
+      "description": "Force-cancel active workers in the team before deleting it. Defaults to false; without this, active teams must be gracefully shut down first.",
+      "type": "boolean",
+    },
+    "team_name": {
+      "description": "Name of the team to delete.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "team_name",
+  ],
+  "type": "object",
+}
+`;
+
 exports[`tool parameters JSON Schema (wire shape) edit 1`] = `
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -149,6 +300,122 @@ exports[`tool parameters JSON Schema (wire shape) invalid 1`] = `
     "tool",
     "error",
   ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) get_task 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "task_id": {
+      "description": "Task id to retrieve.",
+      "type": "string",
+    },
+    "team": {
+      "description": "Optional team task list. Defaults to the current worker's team, the only active team, or this session.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "task_id",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) list_team_tasks 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "owner": {
+      "description": "Optional owner filter.",
+      "type": "string",
+    },
+    "status": {
+      "description": "Optional task status filter.",
+      "enum": [
+        "pending",
+        "in_progress",
+        "completed",
+      ],
+      "type": "string",
+    },
+    "team": {
+      "description": "Optional team task list. Defaults to the current worker's team, the only active team, or this session.",
+      "type": "string",
+    },
+  },
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) list_tasks 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "scope": {
+      "description": "Use "current" to list subagents spawned by this session, or "all" to list every known subagent.",
+      "enum": [
+        "current",
+        "all",
+      ],
+      "type": "string",
+    },
+    "status": {
+      "description": "Optional status filter.",
+      "enum": [
+        "queued",
+        "booting",
+        "running",
+        "waiting_permission",
+        "waiting_input",
+        "idle",
+        "completed",
+        "cancelled",
+        "failed",
+        "interrupted",
+      ],
+      "type": "string",
+    },
+    "team": {
+      "description": "Optional team filter.",
+      "type": "string",
+    },
+  },
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) list_teams 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {},
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) list_peers 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "include_sessions": {
+      "description": "Include same-project session peers addressable as session:<session_id>. Defaults to true.",
+      "type": "boolean",
+    },
+    "include_workers": {
+      "description": "Include subagent worker peers addressable by worker_id or launch name. Defaults to true.",
+      "type": "boolean",
+    },
+    "scope": {
+      "description": "Use "current" to list this session and its workers, or "all" to list recent project sessions too.",
+      "enum": [
+        "current",
+        "all",
+      ],
+      "type": "string",
+    },
+  },
   "type": "object",
 }
 `;
@@ -300,6 +567,356 @@ exports[`tool parameters JSON Schema (wire shape) read 1`] = `
 }
 `;
 
+exports[`tool parameters JSON Schema (wire shape) read_task_output 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "block": {
+      "description": "Task output compatibility mode. When true, wait until the subagent is idle, completed, failed, cancelled, or blocked before reading. Defaults to false for read_task_output.",
+      "type": "boolean",
+    },
+    "include_transcript": {
+      "description": "Include the subagent session transcript in addition to the latest task result.",
+      "type": "boolean",
+    },
+    "limit": {
+      "description": "Maximum number of transcript messages to include when include_transcript is true.",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer",
+    },
+    "task_id": {
+      "description": "The target subagent worker_id, task_id/session_id, or launch name. Names are resolved within the current parent session first.",
+      "type": "string",
+    },
+    "timeout_ms": {
+      "description": "Maximum wait time in milliseconds when block is true.",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer",
+    },
+  },
+  "required": [
+    "task_id",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) remote_trigger 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "action": {
+      "description": "Remote trigger action to perform.",
+      "enum": [
+        "list",
+        "get",
+        "create",
+        "update",
+        "run",
+      ],
+      "type": "string",
+    },
+    "body": {
+      "additionalProperties": {},
+      "description": "JSON body for create and update.",
+      "propertyNames": {
+        "type": "string",
+      },
+      "type": "object",
+    },
+    "trigger_id": {
+      "description": "Remote trigger ID. Required for get, update, and run.",
+      "pattern": "^[\\w-]+$",
+      "type": "string",
+    },
+  },
+  "required": [
+    "action",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) schedule_task 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "cron": {
+      "description": "Standard 5-field cron expression in local time: "M H DoM Mon DoW" (for example "*/5 * * * *" or "30 14 28 2 *").",
+      "type": "string",
+    },
+    "durable": {
+      "description": "true persists to .opencode/scheduled_tasks.json and survives restarts. false (default) is in-memory for this opencode process only.",
+      "type": "boolean",
+    },
+    "prompt": {
+      "description": "The prompt to enqueue when the schedule fires.",
+      "type": "string",
+    },
+    "recurring": {
+      "description": "true (default) fires on every cron match until deleted or auto-expired. false fires once at the next match, then deletes itself.",
+      "type": "boolean",
+    },
+    "to": {
+      "description": "Optional target subagent worker_id, session_id, or launch name. Omit to target the current session; from inside a subagent, omit to target that subagent.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "cron",
+    "prompt",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) list_scheduled_tasks 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {},
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) delete_scheduled_task 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "id": {
+      "description": "Scheduled task ID returned by schedule_task.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "id",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) send_message 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "message": {
+      "anyOf": [
+        {
+          "type": "string",
+        },
+        {
+          "anyOf": [
+            {
+              "properties": {
+                "reason": {
+                  "type": "string",
+                },
+                "request_id": {
+                  "type": "string",
+                },
+                "type": {
+                  "const": "shutdown_request",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+              ],
+              "type": "object",
+            },
+            {
+              "properties": {
+                "approve": {
+                  "type": "boolean",
+                },
+                "reason": {
+                  "type": "string",
+                },
+                "request_id": {
+                  "type": "string",
+                },
+                "type": {
+                  "const": "shutdown_response",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+                "request_id",
+                "approve",
+              ],
+              "type": "object",
+            },
+            {
+              "properties": {
+                "plan": {
+                  "type": "string",
+                },
+                "plan_file_path": {
+                  "type": "string",
+                },
+                "request_id": {
+                  "type": "string",
+                },
+                "type": {
+                  "const": "plan_approval_request",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+                "plan",
+              ],
+              "type": "object",
+            },
+            {
+              "properties": {
+                "approve": {
+                  "type": "boolean",
+                },
+                "feedback": {
+                  "type": "string",
+                },
+                "request_id": {
+                  "type": "string",
+                },
+                "type": {
+                  "const": "plan_approval_response",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+                "request_id",
+                "approve",
+              ],
+              "type": "object",
+            },
+            {
+              "properties": {
+                "always": {
+                  "type": "boolean",
+                },
+                "approve": {
+                  "type": "boolean",
+                },
+                "reason": {
+                  "type": "string",
+                },
+                "request_id": {
+                  "type": "string",
+                },
+                "type": {
+                  "const": "permission_response",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+                "request_id",
+                "approve",
+              ],
+              "type": "object",
+            },
+            {
+              "properties": {
+                "directory_path": {
+                  "type": "string",
+                },
+                "rules": {
+                  "items": {
+                    "properties": {
+                      "action": {
+                        "enum": [
+                          "allow",
+                          "deny",
+                          "ask",
+                        ],
+                        "type": "string",
+                      },
+                      "pattern": {
+                        "type": "string",
+                      },
+                      "permission": {
+                        "type": "string",
+                      },
+                    },
+                    "required": [
+                      "permission",
+                      "pattern",
+                      "action",
+                    ],
+                    "type": "object",
+                  },
+                  "type": "array",
+                },
+                "tool_name": {
+                  "type": "string",
+                },
+                "type": {
+                  "const": "team_permission_update",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+                "rules",
+              ],
+              "type": "object",
+            },
+            {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "default",
+                    "ask",
+                    "accept_edits",
+                    "acceptEdits",
+                    "bypass_permissions",
+                    "bypassPermissions",
+                    "read_only",
+                    "readonly",
+                  ],
+                  "type": "string",
+                },
+                "type": {
+                  "const": "mode_set_request",
+                  "type": "string",
+                },
+              },
+              "required": [
+                "type",
+                "mode",
+              ],
+              "type": "object",
+            },
+          ],
+        },
+      ],
+      "description": "The message to send. Can be plain text or a structured protocol object such as shutdown_request, shutdown_response, plan_approval_request, plan_approval_response, permission_response, team_permission_update, or mode_set_request.",
+    },
+    "summary": {
+      "description": "A short 5-10 word summary of the message for status displays.",
+      "type": "string",
+    },
+    "team": {
+      "description": "Team name to broadcast to when to is "*".",
+      "type": "string",
+    },
+    "to": {
+      "description": "The target subagent worker_id, task_id/session_id, launch name, "session:<session_id>" for a same-project peer session, or "*" to broadcast to a team.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "to",
+    "message",
+  ],
+  "type": "object",
+}
+`;
+
 exports[`tool parameters JSON Schema (wire shape) skill 1`] = `
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -316,6 +933,23 @@ exports[`tool parameters JSON Schema (wire shape) skill 1`] = `
 }
 `;
 
+exports[`tool parameters JSON Schema (wire shape) stop_task 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "reason": {
+      "description": "Optional reason for stopping the subagent.",
+      "type": "string",
+    },
+    "task_id": {
+      "description": "Optional target subagent worker_id, task_id/session_id, or launch name. When omitted from inside a background subagent, stops the current subagent after this turn.",
+      "type": "string",
+    },
+  },
+  "type": "object",
+}
+`;
+
 exports[`tool parameters JSON Schema (wire shape) task 1`] = `
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -324,27 +958,76 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
       "description": "The command that triggered this task",
       "type": "string",
     },
+    "context": {
+      "description": "Controls how much parent conversation context the subagent inherits. Use "fresh" for self-contained delegated work. Use "fork" only when the full parent conversation is required as background.",
+      "enum": [
+        "auto",
+        "fork",
+        "fresh",
+      ],
+      "type": "string",
+    },
+    "cwd": {
+      "description": "Absolute or relative working directory override for the subagent. Do not set this together with isolation; if both are provided, cwd takes precedence and isolation is ignored.",
+      "type": "string",
+    },
     "description": {
       "description": "A short (3-5 words) description of the task",
       "type": "string",
+    },
+    "isolation": {
+      "description": "Usually omit. Set "worktree" only for isolated file edits, or "remote" only when remote execution is explicitly required/configured. For read-only research, omit isolation.",
+      "enum": [
+        "worktree",
+        "remote",
+      ],
+      "type": "string",
+    },
+    "mode": {
+      "const": "plan",
+      "description": "Compatibility spawn mode alias. Set to "plan" only for implementation work that needs approval gating; omit for read-only research/explore tasks.",
+      "type": "string",
+    },
+    "model": {
+      "description": "Optional model override in "provider/model" form. When omitted, the subagent configured model or parent model is used.",
+      "type": "string",
+    },
+    "name": {
+      "description": "Optional name for a background subagent. This makes it addressable with the send_message tool while it is running.",
+      "type": "string",
+    },
+    "plan_mode_required": {
+      "description": "Set true only for implementation subagents that must receive team-lead approval before mutating files or running shell commands. Set false for read-only research.",
+      "type": "boolean",
     },
     "prompt": {
       "description": "The task for the agent to perform",
       "type": "string",
     },
+    "run_in_background": {
+      "description": "Compatibility field. Model-facing subagents run in the background; only trusted internal callers may set this to false for synchronous execution.",
+      "type": "boolean",
+    },
     "subagent_type": {
-      "description": "The type of specialized agent to use for this task",
+      "description": "The type of specialized agent to use for a fresh subagent. Omit this to fork yourself with inherited context.",
       "type": "string",
     },
     "task_id": {
       "description": "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
       "type": "string",
     },
+    "team": {
+      "description": "Optional team name for coordinating multiple background subagents. Agents in the same team can receive broadcast messages.",
+      "type": "string",
+    },
+    "team_name": {
+      "description": "Compatibility alias for team.",
+      "type": "string",
+    },
   },
   "required": [
     "description",
     "prompt",
-    "subagent_type",
   ],
   "type": "object",
 }
@@ -455,6 +1138,107 @@ exports[`tool parameters JSON Schema (wire shape) websearch 1`] = `
   "required": [
     "query",
   ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) update_task 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "active_form": {
+      "description": "New active-form text.",
+      "type": "string",
+    },
+    "add_blocked_by": {
+      "description": "Task ids that must complete before this task can start.",
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "add_blocks": {
+      "description": "Task ids that this task blocks.",
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "description": {
+      "description": "New task description.",
+      "type": "string",
+    },
+    "metadata": {
+      "additionalProperties": {},
+      "description": "Metadata keys to merge. Set a key to null to delete it.",
+      "propertyNames": {
+        "type": "string",
+      },
+      "type": "object",
+    },
+    "owner": {
+      "description": "New task owner/worker name.",
+      "type": "string",
+    },
+    "status": {
+      "anyOf": [
+        {
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed",
+          ],
+          "type": "string",
+        },
+        {
+          "const": "deleted",
+          "type": "string",
+        },
+      ],
+      "description": "New status: "pending", "in_progress", "completed", or "deleted".",
+    },
+    "subject": {
+      "description": "New task title.",
+      "type": "string",
+    },
+    "task_id": {
+      "description": "Task id to update.",
+      "type": "string",
+    },
+    "team": {
+      "description": "Optional team task list. Defaults to the current worker's team, the only active team, or this session.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "task_id",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`tool parameters JSON Schema (wire shape) wait_task 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "task_id": {
+      "description": "The target subagent worker_id, task_id/session_id, or launch name. Names are resolved within the current parent session first.",
+      "type": "string",
+    },
+    "task_ids": {
+      "description": "Multiple target subagents to wait for. Each item accepts worker_id, task_id/session_id, or name.",
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "timeout_ms": {
+      "description": "Maximum time to wait in milliseconds. If omitted, waits until each task completes, idles, fails, or blocks.",
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer",
+    },
+  },
   "type": "object",
 }
 `;

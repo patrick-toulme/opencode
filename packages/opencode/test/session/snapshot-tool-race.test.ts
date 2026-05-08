@@ -50,6 +50,8 @@ import { SessionRunState } from "../../src/session/run-state"
 import { SessionStatus } from "../../src/session/status"
 import { Snapshot } from "../../src/snapshot"
 import { ToolRegistry } from "@/tool/registry"
+import { SwarmRuntime } from "@/swarm/runtime"
+import { ScheduledTask } from "@/schedule/runtime"
 import { Truncate } from "@/tool/truncate"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -124,12 +126,20 @@ function makeHttp() {
   ).pipe(Layer.provideMerge(infra))
   const question = Question.layer.pipe(Layer.provideMerge(deps))
   const todo = Todo.layer.pipe(Layer.provideMerge(deps))
+  const swarm = SwarmRuntime.defaultLayer
+  const scheduled = ScheduledTask.layer.pipe(
+    Layer.provideMerge(AppFileSystem.defaultLayer),
+    Layer.provideMerge(Bus.layer),
+    Layer.provideMerge(swarm),
+  )
   const registry = ToolRegistry.layer.pipe(
     Layer.provide(Skill.defaultLayer),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(Ripgrep.defaultLayer),
     Layer.provide(Format.defaultLayer),
+    Layer.provideMerge(swarm),
+    Layer.provideMerge(scheduled),
     Layer.provideMerge(todo),
     Layer.provideMerge(question),
     Layer.provideMerge(deps),
@@ -140,6 +150,8 @@ function makeHttp() {
   return Layer.mergeAll(
     TestLLMServer.layer,
     SessionSummary.defaultLayer,
+    swarm,
+    scheduled,
     SessionPrompt.layer.pipe(
       Layer.provide(SessionRevert.defaultLayer),
       Layer.provide(SessionSummary.defaultLayer),
@@ -148,6 +160,8 @@ function makeHttp() {
       Layer.provideMerge(proc),
       Layer.provideMerge(registry),
       Layer.provideMerge(trunc),
+      Layer.provideMerge(swarm),
+      Layer.provideMerge(scheduled),
       Layer.provide(Instruction.defaultLayer),
       Layer.provide(SystemPrompt.defaultLayer),
       Layer.provideMerge(deps),

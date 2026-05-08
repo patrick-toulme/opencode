@@ -13,6 +13,7 @@ import type {
   AuthRemoveResponses,
   AuthSetErrors,
   AuthSetResponses,
+  BtwPartInput,
   CommandListResponses,
   Config as Config3,
   ConfigGetResponses,
@@ -119,6 +120,8 @@ import type {
   QuestionReplyResponses,
   SessionAbortErrors,
   SessionAbortResponses,
+  SessionBtwErrors,
+  SessionBtwResponses,
   SessionChildrenErrors,
   SessionChildrenResponses,
   SessionCommandErrors,
@@ -135,6 +138,12 @@ import type {
   SessionForkResponses,
   SessionGetErrors,
   SessionGetResponses,
+  SessionGoalClearErrors,
+  SessionGoalClearResponses,
+  SessionGoalSetErrors,
+  SessionGoalSetResponses,
+  SessionGoalUpdateErrors,
+  SessionGoalUpdateResponses,
   SessionInitErrors,
   SessionInitResponses,
   SessionListResponses,
@@ -165,6 +174,32 @@ import type {
   SessionUpdateErrors,
   SessionUpdateResponses,
   SubtaskPartInput,
+  SwarmTaskCreateErrors,
+  SwarmTaskCreateResponses,
+  SwarmTaskGetErrors,
+  SwarmTaskGetResponses,
+  SwarmTasksErrors,
+  SwarmTasksResponses,
+  SwarmTaskUpdateErrors,
+  SwarmTaskUpdateResponses,
+  SwarmTeamBroadcastErrors,
+  SwarmTeamBroadcastResponses,
+  SwarmTeamCreateErrors,
+  SwarmTeamCreateResponses,
+  SwarmTeamDeleteErrors,
+  SwarmTeamDeleteResponses,
+  SwarmTeamsErrors,
+  SwarmTeamsResponses,
+  SwarmWorkerCancelErrors,
+  SwarmWorkerCancelResponses,
+  SwarmWorkerMessageErrors,
+  SwarmWorkerMessageResponses,
+  SwarmWorkerPaneErrors,
+  SwarmWorkerPaneResponses,
+  SwarmWorkersErrors,
+  SwarmWorkersResponses,
+  SwarmWorkerStopErrors,
+  SwarmWorkerStopResponses,
   SyncHistoryListErrors,
   SyncHistoryListResponses,
   SyncReplayErrors,
@@ -2905,6 +2940,120 @@ export class Provider extends HeyApiClient {
   }
 }
 
+export class Goal extends HeyApiClient {
+  /**
+   * Clear goal
+   *
+   * Detach the long-term goal from this session.
+   */
+  public clear<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<SessionGoalClearResponses, SessionGoalClearErrors, ThrowOnError>({
+      url: "/session/{sessionID}/goal",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update goal status
+   *
+   * Pause, resume, or mark complete the long-term goal attached to this session.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      status?: "active" | "paused" | "complete"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "status" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<SessionGoalUpdateResponses, SessionGoalUpdateErrors, ThrowOnError>({
+      url: "/session/{sessionID}/goal",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Set goal
+   *
+   * Attach a long-term goal to the session. The goal is re-injected into the model's system prompt every turn until cleared or marked complete.
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      objective?: string
+      tokenBudget?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "objective" },
+            { in: "body", key: "tokenBudget" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<SessionGoalSetResponses, SessionGoalSetErrors, ThrowOnError>({
+      url: "/session/{sessionID}/goal",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Session2 extends HeyApiClient {
   /**
    * List sessions
@@ -3295,7 +3444,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       variant?: string
-      parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+      parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | BtwPartInput>
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3440,6 +3589,38 @@ export class Session2 extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Btw session
+   *
+   * Open a side-thread that inherits the parent session's full message history without modifying the parent.
+   */
+  public btw<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SessionBtwResponses, SessionBtwErrors, ThrowOnError>({
+      url: "/session/{sessionID}/btw",
+      ...options,
+      ...params,
     })
   }
 
@@ -3648,7 +3829,7 @@ export class Session2 extends HeyApiClient {
       format?: OutputFormat
       system?: string
       variant?: string
-      parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+      parts?: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | BtwPartInput>
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3863,6 +4044,11 @@ export class Session2 extends HeyApiClient {
       ...params,
     })
   }
+
+  private _goal?: Goal
+  get goal(): Goal {
+    return (this._goal ??= new Goal({ client: this.client }))
+  }
 }
 
 export class Part extends HeyApiClient {
@@ -3939,6 +4125,550 @@ export class Part extends HeyApiClient {
         ...params.headers,
       },
     })
+  }
+}
+
+export class Team extends HeyApiClient {
+  /**
+   * Create subagent team
+   *
+   * Create a named team for coordinating background subagents.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      team_name?: string
+      description?: string
+      agent_type?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "team_name" },
+            { in: "body", key: "description" },
+            { in: "body", key: "agent_type" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmTeamCreateResponses, SwarmTeamCreateErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/team",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete subagent team
+   *
+   * Delete a subagent team. Refuses active workers by default; pass cancel_workers=true to force-cancel them.
+   */
+  public delete<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      teamName: string
+      directory?: string
+      workspace?: string
+      cancel_workers?: "true" | "false"
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "teamName" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "cancel_workers" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<SwarmTeamDeleteResponses, SwarmTeamDeleteErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/team/{teamName}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Broadcast to subagent team
+   *
+   * Send the same message to every active worker in a subagent team.
+   */
+  public broadcast<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      teamName: string
+      directory?: string
+      workspace?: string
+      message?: string
+      summary?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "teamName" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "message" },
+            { in: "body", key: "summary" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmTeamBroadcastResponses, SwarmTeamBroadcastErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/team/{teamName}/broadcast",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Worker extends HeyApiClient {
+  /**
+   * Message subagent worker
+   *
+   * Queue a follow-up message for a running or idle subagent worker.
+   */
+  public message<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      target: string
+      directory?: string
+      workspace?: string
+      message?: string
+      summary?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "target" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "message" },
+            { in: "body", key: "summary" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmWorkerMessageResponses, SwarmWorkerMessageErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/worker/{target}/message",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel subagent worker
+   *
+   * Cancel a subagent worker by worker id, child session id, or name.
+   */
+  public cancel<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      target: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "target" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmWorkerCancelResponses, SwarmWorkerCancelErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/worker/{target}/cancel",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Stop subagent worker
+   *
+   * Stop a subagent worker by worker id, child session id, or name.
+   */
+  public stop<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      target: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "target" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmWorkerStopResponses, SwarmWorkerStopErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/worker/{target}/stop",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Hide or show subagent worker pane
+   *
+   * Hide or show a pane-backed subagent worker without stopping it.
+   */
+  public pane<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      target: string
+      action: "hide" | "show"
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "target" },
+            { in: "path", key: "action" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmWorkerPaneResponses, SwarmWorkerPaneErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/worker/{target}/pane/{action}",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class Task extends HeyApiClient {
+  /**
+   * Create shared subagent task
+   *
+   * Create a shared task-board entry for a parent session or team.
+   */
+  public create<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      team?: string
+      subject?: string
+      description?: string
+      active_form?: string
+      owner?: string
+      metadata?: {
+        [key: string]: unknown
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "team" },
+            { in: "body", key: "subject" },
+            { in: "body", key: "description" },
+            { in: "body", key: "active_form" },
+            { in: "body", key: "owner" },
+            { in: "body", key: "metadata" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<SwarmTaskCreateResponses, SwarmTaskCreateErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/task",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get shared subagent task
+   *
+   * Get one shared task-board entry by id.
+   */
+  public get<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      taskID: string
+      directory?: string
+      workspace?: string
+      team?: string
+      status?: "pending" | "in_progress" | "completed"
+      owner?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "team" },
+            { in: "query", key: "status" },
+            { in: "query", key: "owner" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SwarmTaskGetResponses, SwarmTaskGetErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/task/{taskID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update shared subagent task
+   *
+   * Update, assign, complete, delete, or add dependencies to a shared task-board entry.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      taskID: string
+      directory?: string
+      workspace?: string
+      team?: string
+      subject?: string
+      description?: string
+      active_form?: string
+      status?: "pending" | "in_progress" | "completed" | "deleted"
+      owner?: string
+      add_blocks?: Array<string>
+      add_blocked_by?: Array<string>
+      metadata?: {
+        [key: string]: unknown
+      }
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "taskID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "team" },
+            { in: "body", key: "subject" },
+            { in: "body", key: "description" },
+            { in: "body", key: "active_form" },
+            { in: "body", key: "status" },
+            { in: "body", key: "owner" },
+            { in: "body", key: "add_blocks" },
+            { in: "body", key: "add_blocked_by" },
+            { in: "body", key: "metadata" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<SwarmTaskUpdateResponses, SwarmTaskUpdateErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/task/{taskID}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Swarm extends HeyApiClient {
+  /**
+   * List subagent workers
+   *
+   * List subagent workers spawned by a parent session.
+   */
+  public workers<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SwarmWorkersResponses, SwarmWorkersErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/worker",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List subagent teams
+   *
+   * List subagent teams for a parent session.
+   */
+  public teams<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SwarmTeamsResponses, SwarmTeamsErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/team",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List shared subagent tasks
+   *
+   * List shared task-board entries for a parent session or team.
+   */
+  public tasks<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      team?: string
+      status?: "pending" | "in_progress" | "completed"
+      owner?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "team" },
+            { in: "query", key: "status" },
+            { in: "query", key: "owner" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SwarmTasksResponses, SwarmTasksErrors, ThrowOnError>({
+      url: "/swarm/{sessionID}/task",
+      ...options,
+      ...params,
+    })
+  }
+
+  private _team?: Team
+  get team(): Team {
+    return (this._team ??= new Team({ client: this.client }))
+  }
+
+  private _worker?: Worker
+  get worker(): Worker {
+    return (this._worker ??= new Worker({ client: this.client }))
+  }
+
+  private _task?: Task
+  get task(): Task {
+    return (this._task ??= new Task({ client: this.client }))
   }
 }
 
@@ -4893,6 +5623,11 @@ export class OpencodeClient extends HeyApiClient {
   private _part?: Part
   get part(): Part {
     return (this._part ??= new Part({ client: this.client }))
+  }
+
+  private _swarm?: Swarm
+  get swarm(): Swarm {
+    return (this._swarm ??= new Swarm({ client: this.client }))
   }
 
   private _sync?: Sync

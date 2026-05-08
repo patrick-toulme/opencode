@@ -29,6 +29,12 @@ const AgentSchema = Schema.StructWithRest(
     temperature: Schema.optional(Schema.Finite),
     top_p: Schema.optional(Schema.Finite),
     prompt: Schema.optional(Schema.String),
+    initial_prompt: Schema.optional(Schema.String).annotate({
+      description: "Prompt text to prepend to the first task prompt when this agent is spawned as a subagent.",
+    }),
+    initialPrompt: Schema.optional(Schema.String).annotate({
+      description: "@deprecated Use initial_prompt.",
+    }),
     tools: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)).annotate({
       description: "@deprecated Use 'permission' field instead",
     }),
@@ -37,6 +43,17 @@ const AgentSchema = Schema.StructWithRest(
     mode: Schema.optional(Schema.Literals(["subagent", "primary", "all"])),
     hidden: Schema.optional(Schema.Boolean).annotate({
       description: "Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)",
+    }),
+    memory: Schema.optional(Schema.Literals(["user", "project", "local"])).annotate({
+      description:
+        "Enable persistent file-based memory for this agent. user stores under opencode data, project stores under .opencode/agent-memory, local stores under .opencode/agent-memory-local.",
+    }),
+    background: Schema.optional(Schema.Boolean).annotate({
+      description: "Always run this subagent as a long-lived background teammate when spawned through the task tool.",
+    }),
+    isolation: Schema.optional(Schema.Literals(["worktree", "remote"])).annotate({
+      description:
+        'Default isolation for this subagent. "worktree" creates an isolated git worktree; "remote" launches through the configured remote subagent backend.',
     }),
     options: Schema.optional(Schema.Record(Schema.String, Schema.Any)),
     color: Schema.optional(Color).annotate({
@@ -56,11 +73,16 @@ const KNOWN_KEYS = new Set([
   "model",
   "variant",
   "prompt",
+  "initial_prompt",
+  "initialPrompt",
   "description",
   "temperature",
   "top_p",
   "mode",
   "hidden",
+  "memory",
+  "background",
+  "isolation",
   "color",
   "steps",
   "maxSteps",

@@ -18,6 +18,7 @@ import { QuestionRoutes } from "./question"
 import { PermissionRoutes } from "./permission"
 import { ProjectRoutes } from "./project"
 import { SessionRoutes } from "./session"
+import { SwarmRoutes } from "./swarm"
 import { PtyRoutes } from "./pty"
 import { McpRoutes } from "./mcp"
 import { FileRoutes } from "./file"
@@ -36,6 +37,7 @@ import { InstancePaths } from "./httpapi/groups/instance"
 import { McpPaths } from "./httpapi/groups/mcp"
 import { PtyPaths } from "./httpapi/groups/pty"
 import { SessionPaths } from "./httpapi/groups/session"
+import { SwarmPaths } from "./httpapi/groups/swarm"
 import { SyncPaths } from "./httpapi/groups/sync"
 import { TuiPaths } from "./httpapi/groups/tui"
 import { WorkspacePaths } from "./httpapi/groups/workspace"
@@ -127,7 +129,11 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, opts?: CorsOptions): H
     app.patch(SessionPaths.update, (c) => handler(c.req.raw, context))
     app.post(SessionPaths.init, (c) => handler(c.req.raw, context))
     app.post(SessionPaths.fork, (c) => handler(c.req.raw, context))
+    app.post(SessionPaths.btw, (c) => handler(c.req.raw, context))
     app.post(SessionPaths.abort, (c) => handler(c.req.raw, context))
+    app.put(SessionPaths.goal, (c) => handler(c.req.raw, context))
+    app.patch(SessionPaths.goal, (c) => handler(c.req.raw, context))
+    app.delete(SessionPaths.goal, (c) => handler(c.req.raw, context))
     app.post(SessionPaths.share, (c) => handler(c.req.raw, context))
     app.delete(SessionPaths.share, (c) => handler(c.req.raw, context))
     app.post(SessionPaths.summarize, (c) => handler(c.req.raw, context))
@@ -137,11 +143,18 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, opts?: CorsOptions): H
     app.post(SessionPaths.shell, (c) => handler(c.req.raw, context))
     app.post(SessionPaths.revert, (c) => handler(c.req.raw, context))
     app.post(SessionPaths.unrevert, (c) => handler(c.req.raw, context))
-    app.post(SessionPaths.permissions, (c) => handler(c.req.raw, context))
-    app.delete(SessionPaths.deleteMessage, (c) => handler(c.req.raw, context))
-    app.delete(SessionPaths.deletePart, (c) => handler(c.req.raw, context))
-    app.patch(SessionPaths.updatePart, (c) => handler(c.req.raw, context))
-    app.post(TuiPaths.appendPrompt, (c) => handler(c.req.raw, context))
+	    app.post(SessionPaths.permissions, (c) => handler(c.req.raw, context))
+	    app.delete(SessionPaths.deleteMessage, (c) => handler(c.req.raw, context))
+	    app.delete(SessionPaths.deletePart, (c) => handler(c.req.raw, context))
+	    app.patch(SessionPaths.updatePart, (c) => handler(c.req.raw, context))
+	    app.get(SwarmPaths.workers, (c) => handler(c.req.raw, context))
+	    app.get(SwarmPaths.teams, (c) => handler(c.req.raw, context))
+	    app.post(SwarmPaths.workerMessage, (c) => handler(c.req.raw, context))
+	    app.post(SwarmPaths.workerCancel, (c) => handler(c.req.raw, context))
+	    app.post(SwarmPaths.teamCreate, (c) => handler(c.req.raw, context))
+	    app.delete(SwarmPaths.teamDelete, (c) => handler(c.req.raw, context))
+	    app.post(SwarmPaths.teamBroadcast, (c) => handler(c.req.raw, context))
+	    app.post(TuiPaths.appendPrompt, (c) => handler(c.req.raw, context))
     app.post(TuiPaths.openHelp, (c) => handler(c.req.raw, context))
     app.post(TuiPaths.openSessions, (c) => handler(c.req.raw, context))
     app.post(TuiPaths.openThemes, (c) => handler(c.req.raw, context))
@@ -168,6 +181,7 @@ export const InstanceRoutes = (upgrade: UpgradeWebSocket, opts?: CorsOptions): H
     .route("/config", ConfigRoutes())
     .route("/experimental", ExperimentalRoutes())
     .route("/session", SessionRoutes())
+    .route("/swarm", SwarmRoutes())
     .route("/permission", PermissionRoutes())
     .route("/question", QuestionRoutes())
     .route("/provider", ProviderRoutes())

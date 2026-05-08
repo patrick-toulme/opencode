@@ -33,6 +33,40 @@ type Result = Awaited<ReturnType<typeof streamText>>
 const mergeOptions = (target: Record<string, any>, source: Record<string, any> | undefined): Record<string, any> =>
   mergeDeep(target, source ?? {}) as Record<string, any>
 
+export const COMPAT_TOOL_ALIAS_NAMES = {
+  Agent: "task",
+  Task: "task",
+  SendMessage: "send_message",
+  TaskCreate: "create_task",
+  TaskUpdate: "update_task",
+  TaskGet: "get_task",
+  TaskList: "list_team_tasks",
+  TaskStop: "stop_task",
+  TaskOutput: "read_task_output",
+  TeamCreate: "create_team",
+  TeamDelete: "delete_team",
+  CronCreate: "schedule_task",
+  CronList: "list_scheduled_tasks",
+  CronDelete: "delete_scheduled_task",
+  RemoteTrigger: "remote_trigger",
+  ExitPlanMode: "plan_exit",
+  TodoWrite: "todo",
+} as const satisfies { [key: string]: string }
+
+const COMPAT_TOOL_ALIASES = Object.fromEntries(
+  Object.entries(COMPAT_TOOL_ALIAS_NAMES).map(([alias, target]) => [alias.toLowerCase(), target]),
+) as Record<string, string>
+
+export function compatibleToolAliasesFor(toolName: string) {
+  return Object.entries(COMPAT_TOOL_ALIAS_NAMES)
+    .filter(([, target]) => target === toolName)
+    .map(([alias]) => alias)
+}
+
+export function canonicalToolName(toolName: string) {
+  return COMPAT_TOOL_ALIASES[toolName.toLowerCase()] ?? toolName
+}
+
 export type StreamInput = {
   user: MessageV2.User
   sessionID: string
@@ -340,6 +374,19 @@ const live: Layer.Layer<
           })
         },
         async experimental_repairToolCall(failed) {
+          const alias = repairCompatibleToolCall(failed.toolCall.toolName, failed.toolCall.input, tools)
+          if (alias) {
+            l.info("repairing compatible tool call", {
+              tool: failed.toolCall.toolName,
+              repaired: alias.toolName,
+            })
+            return {
+              ...failed.toolCall,
+              toolName: alias.toolName,
+              input: alias.input,
+            }
+          }
+
           const lower = failed.toolCall.toolName.toLowerCase()
           if (lower !== failed.toolCall.toolName && tools[lower]) {
             l.info("repairing tool call", {
@@ -426,7 +473,9 @@ const live: Layer.Layer<
 
             const result = yield* run({ ...input, abort: ctrl.signal })
 
-            return Stream.fromAsyncIterable(result.fullStream, (e) => (e instanceof Error ? e : new Error(String(e))))
+            return Stream.fromAsyncIterable(result.fullStream, (e) => (e instanceof Error ? e : new Error(String(e)))).pipe(
+              Stream.map(canonicalizeToolEvent),
+            )
           }),
         ),
       )
@@ -446,12 +495,28 @@ export const defaultLayer = Layer.suspend(() =>
   ),
 )
 
+function canonicalizeToolEvent(event: Event): Event {
+  const item = event as Event & { toolName?: unknown }
+  if (typeof item.toolName !== "string") return event
+  const toolName = canonicalToolName(item.toolName)
+  if (toolName === item.toolName) return event
+  return {
+    ...event,
+    toolName,
+  } as Event
+}
+
 function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
+  const toolNames = Object.keys(input.tools)
+  const canonicalToolNames = [...new Set(toolNames.map(canonicalToolName))]
   const disabled = Permission.disabled(
-    Object.keys(input.tools),
+    canonicalToolNames,
     Permission.merge(input.agent.permission, input.permission ?? []),
   )
-  return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
+  return Record.filter(input.tools, (_, key) => {
+    const canonical = canonicalToolName(key)
+    return input.user.tools?.[key] !== false && input.user.tools?.[canonical] !== false && !disabled.has(canonical)
+  })
 }
 
 // Check if messages contain any tool-call content
@@ -464,6 +529,81 @@ export function hasToolCalls(messages: ModelMessage[]): boolean {
     }
   }
   return false
+}
+
+export function repairCompatibleToolCall(
+  toolName: string,
+  input: unknown,
+  tools: { [key: string]: unknown },
+): { toolName: string; input: string } | undefined {
+  const target = COMPAT_TOOL_ALIASES[toolName.toLowerCase() as keyof typeof COMPAT_TOOL_ALIASES]
+  if (!target || !tools[target]) return undefined
+  return {
+    toolName: target,
+    input: normalizeCompatibleToolInput(target, input),
+  }
+}
+
+function normalizeCompatibleToolInput(toolName: string, input: unknown): string {
+  const parsed = parseToolInput(input)
+  if (!parsed.ok) return typeof input === "string" ? input : JSON.stringify(input)
+  const value = parsed.value
+  if (!isPlainObject(value)) return typeof input === "string" ? input : JSON.stringify(value)
+
+  const normalized = { ...value }
+  const rename = (from: string, to: string) => {
+    if (!(from in normalized)) return
+    if (!(to in normalized)) normalized[to] = normalized[from]
+    if (from !== to) delete normalized[from]
+  }
+
+  if (toolName === "task") {
+    rename("teamName", "team_name")
+  }
+
+  if (
+    toolName === "create_task" ||
+    toolName === "update_task" ||
+    toolName === "get_task" ||
+    toolName === "list_team_tasks"
+  ) {
+    rename("teamName", "team")
+    rename("taskId", "task_id")
+    rename("activeForm", "active_form")
+    rename("addBlocks", "add_blocks")
+    rename("addBlockedBy", "add_blocked_by")
+  }
+
+  if (toolName === "create_team" || toolName === "delete_team") {
+    rename("teamName", "team_name")
+    rename("agentType", "agent_type")
+    rename("cancelWorkers", "cancel_workers")
+  }
+
+  if (toolName === "read_task_output") {
+    rename("timeout", "timeout_ms")
+  }
+
+  if (toolName === "remote_trigger") {
+    rename("triggerId", "trigger_id")
+  }
+
+  return JSON.stringify(normalized)
+}
+
+function parseToolInput(input: unknown): { ok: true; value: unknown } | { ok: false } {
+  if (typeof input === "string") {
+    try {
+      return { ok: true, value: JSON.parse(input) }
+    } catch {
+      return { ok: false }
+    }
+  }
+  return { ok: true, value: input }
+}
+
+function isPlainObject(value: unknown): value is { [key: string]: unknown } {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 export * as LLM from "./llm"

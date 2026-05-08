@@ -17,6 +17,10 @@ import type {
   ProviderListResponse,
   ProviderAuthMethod,
   VcsInfo,
+  Event,
+  SwarmTeamSnapshot,
+  SwarmTeamTaskState,
+  SwarmWorkerState,
 } from "@opencode-ai/sdk/v2"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useProject } from "@tui/context/project"
@@ -32,6 +36,24 @@ import * as Log from "@opencode-ai/core/util/log"
 import { emptyConsoleState, type ConsoleState } from "@/config/console-state"
 import path from "path"
 import { useKV } from "./kv"
+
+type SyncedWorkerEvent = Extract<
+  Event,
+  {
+    type:
+      | "swarm.worker.spawned"
+      | "swarm.worker.status"
+      | "swarm.worker.progress"
+      | "swarm.worker.tool"
+      | "swarm.worker.permission"
+      | "swarm.worker.input.queued"
+      | "swarm.worker.idle"
+      | "swarm.worker.stopped"
+  }
+>
+type SyncedWorker = SwarmWorkerState | SyncedWorkerEvent["properties"]["worker"]
+type SyncedTeam = SwarmTeamSnapshot
+type SyncedTeamTask = SwarmTeamTaskState
 
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
   name: "Sync",
@@ -77,6 +99,17 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       }
       formatter: FormatterStatus[]
       vcs: VcsInfo | undefined
+      swarm: {
+        worker: {
+          [sessionID: string]: SyncedWorker[]
+        }
+        team: {
+          [sessionID: string]: SyncedTeam[]
+        }
+        task: {
+          [sessionID: string]: SyncedTeamTask[]
+        }
+      }
     }>({
       provider_next: {
         all: [],
@@ -104,6 +137,11 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       mcp_resource: {},
       formatter: [],
       vcs: undefined,
+      swarm: {
+        worker: {},
+        team: {},
+        task: {},
+      },
     })
 
     const event = useEvent()
@@ -130,10 +168,123 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         .then((x) => (x.data ?? []).toSorted((a, b) => a.id.localeCompare(b.id)))
     }
 
+    function upsertWorker(worker: SyncedWorker) {
+      const parentSessionID = worker.spec.parentSessionID
+      const workers = store.swarm.worker[parentSessionID]
+      if (!workers) {
+        setStore("swarm", "worker", parentSessionID, [worker])
+        return
+      }
+      setStore(
+        "swarm",
+        "worker",
+        parentSessionID,
+        produce((draft) => {
+          const index = draft.findIndex((item) => item.spec.workerID === worker.spec.workerID)
+          if (index >= 0) draft[index] = worker
+          else draft.push(worker)
+          draft.sort(
+            (a, b) => Number(a.startedAt) - Number(b.startedAt) || a.spec.workerID.localeCompare(b.spec.workerID),
+          )
+        }),
+      )
+    }
+
+    function upsertTeam(team: SyncedTeam) {
+      const teams = store.swarm.team[team.parentSessionID]
+      if (!teams) {
+        setStore("swarm", "team", team.parentSessionID, [team])
+        return
+      }
+      setStore(
+        "swarm",
+        "team",
+        team.parentSessionID,
+        produce((draft) => {
+          const index = draft.findIndex((item) => item.name === team.name)
+          if (index >= 0) draft[index] = team
+          else draft.push(team)
+          draft.sort((a, b) => Number(a.createdAt) - Number(b.createdAt) || a.name.localeCompare(b.name))
+        }),
+      )
+    }
+
+    function removeTeam(team: SyncedTeam) {
+      const teams = store.swarm.team[team.parentSessionID]
+      if (!teams) return
+      setStore(
+        "swarm",
+        "team",
+        team.parentSessionID,
+        produce((draft) => {
+          const index = draft.findIndex((item) => item.name === team.name)
+          if (index >= 0) draft.splice(index, 1)
+        }),
+      )
+    }
+
+    function upsertTeamTask(task: SyncedTeamTask) {
+      const tasks = store.swarm.task[task.parentSessionID]
+      if (!tasks) {
+        setStore("swarm", "task", task.parentSessionID, [task])
+        return
+      }
+      setStore(
+        "swarm",
+        "task",
+        task.parentSessionID,
+        produce((draft) => {
+          const index = draft.findIndex((item) => item.id === task.id && item.team === task.team)
+          if (index >= 0) draft[index] = task
+          else draft.push(task)
+          draft.sort((a, b) => Number(a.id) - Number(b.id) || a.id.localeCompare(b.id))
+        }),
+      )
+    }
+
+    function removeTeamTask(task: SyncedTeamTask) {
+      const tasks = store.swarm.task[task.parentSessionID]
+      if (!tasks) return
+      setStore(
+        "swarm",
+        "task",
+        task.parentSessionID,
+        produce((draft) => {
+          const index = draft.findIndex((item) => item.id === task.id && item.team === task.team)
+          if (index >= 0) draft.splice(index, 1)
+        }),
+      )
+    }
+
     event.subscribe((event) => {
       switch (event.type) {
         case "server.instance.disposed":
           void bootstrap()
+          break
+        case "swarm.worker.spawned":
+        case "swarm.worker.status":
+        case "swarm.worker.progress":
+        case "swarm.worker.tool":
+        case "swarm.worker.permission":
+        case "swarm.worker.input.queued":
+        case "swarm.worker.idle":
+        case "swarm.worker.stopped":
+          upsertWorker(event.properties.worker)
+          break
+        case "swarm.team.created":
+        case "swarm.team.updated":
+          upsertTeam(event.properties.team)
+          break
+        case "swarm.team.deleted":
+          removeTeam(event.properties.team)
+          break
+        case "swarm.task.created":
+        case "swarm.task.updated":
+        case "swarm.task.completed":
+          upsertTeamTask(event.properties.task)
+          break
+        case "swarm.task.deleted":
+          removeTeamTask(event.properties.task)
           break
         case "permission.replied": {
           const requests = store.permission[event.properties.sessionID]
@@ -514,11 +665,14 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         },
         async sync(sessionID: string) {
           if (fullSyncedSessions.has(sessionID)) return
-          const [session, messages, todo, diff] = await Promise.all([
+          const [session, messages, todo, diff, swarmWorkers, swarmTeams, swarmTasks] = await Promise.all([
             sdk.client.session.get({ sessionID }, { throwOnError: true }),
             sdk.client.session.messages({ sessionID, limit: 100 }),
             sdk.client.session.todo({ sessionID }),
             sdk.client.session.diff({ sessionID }),
+            sdk.client.swarm.workers({ sessionID }).then((x) => x.data ?? []),
+            sdk.client.swarm.teams({ sessionID }).then((x) => x.data ?? []),
+            sdk.client.swarm.tasks({ sessionID }).then((x) => x.data ?? []),
           ])
           setStore(
             produce((draft) => {
@@ -531,6 +685,9 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
                 draft.part[message.info.id] = message.parts
               }
               draft.session_diff[sessionID] = diff.data ?? []
+              draft.swarm.worker[sessionID] = swarmWorkers
+              draft.swarm.team[sessionID] = swarmTeams
+              draft.swarm.task[sessionID] = swarmTasks
             }),
           )
           fullSyncedSessions.add(sessionID)

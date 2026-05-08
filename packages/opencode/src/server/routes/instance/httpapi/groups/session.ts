@@ -67,6 +67,10 @@ export const RevertPayload = Schema.Struct(Struct.omit(SessionRevert.RevertInput
 export const PermissionResponsePayload = Schema.Struct({
   response: Permission.Reply,
 })
+export const GoalSetPayload = Schema.Struct(Struct.omit(Session.SetGoalInput.fields, ["sessionID"]))
+export const GoalUpdatePayload = Schema.Struct({
+  status: Schema.Literals(["active", "paused", "complete"]),
+})
 
 export const SessionPaths = {
   list: root,
@@ -81,7 +85,9 @@ export const SessionPaths = {
   remove: `${root}/:sessionID`,
   update: `${root}/:sessionID`,
   fork: `${root}/:sessionID/fork`,
+  btw: `${root}/:sessionID/btw`,
   abort: `${root}/:sessionID/abort`,
+  goal: `${root}/:sessionID/goal`,
   share: `${root}/:sessionID/share`,
   init: `${root}/:sessionID/init`,
   summarize: `${root}/:sessionID/summarize`,
@@ -234,6 +240,18 @@ export const SessionApi = HttpApi.make("session")
             description: "Create a new session by forking an existing session at a specific message point.",
           }),
         ),
+        HttpApiEndpoint.post("btw", SessionPaths.btw, {
+          params: { sessionID: SessionID },
+          success: described(Session.Info, "200"),
+          error: ApiNotFoundError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.btw",
+            summary: "Btw session",
+            description:
+              "Open a side-thread that inherits the parent session's full message history without modifying the parent.",
+          }),
+        ),
         HttpApiEndpoint.post("abort", SessionPaths.abort, {
           params: { sessionID: SessionID },
           success: described(Schema.Boolean, "Aborted session"),
@@ -243,6 +261,42 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.abort",
             summary: "Abort session",
             description: "Abort an active session and stop any ongoing AI processing or command execution.",
+          }),
+        ),
+        HttpApiEndpoint.put("goalSet", SessionPaths.goal, {
+          params: { sessionID: SessionID },
+          payload: GoalSetPayload,
+          success: described(Session.Info, "Updated session"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.goal.set",
+            summary: "Set goal",
+            description:
+              "Attach a long-term goal to the session. The goal is re-injected into the model's system prompt every turn until cleared or marked complete.",
+          }),
+        ),
+        HttpApiEndpoint.patch("goalUpdate", SessionPaths.goal, {
+          params: { sessionID: SessionID },
+          payload: GoalUpdatePayload,
+          success: described(Session.Info, "Updated session"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.goal.update",
+            summary: "Update goal status",
+            description: "Pause, resume, or mark complete the long-term goal attached to this session.",
+          }),
+        ),
+        HttpApiEndpoint.delete("goalClear", SessionPaths.goal, {
+          params: { sessionID: SessionID },
+          success: described(Session.Info, "Updated session"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.goal.clear",
+            summary: "Clear goal",
+            description: "Detach the long-term goal from this session.",
           }),
         ),
         HttpApiEndpoint.post("init", SessionPaths.init, {

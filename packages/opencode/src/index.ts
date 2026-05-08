@@ -29,6 +29,7 @@ import { EOL } from "os"
 import { WebCommand } from "./cli/cmd/web"
 import { PrCommand } from "./cli/cmd/pr"
 import { SessionCommand } from "./cli/cmd/session"
+import { SwarmCommand } from "./cli/cmd/swarm"
 import { DbCommand } from "./cli/cmd/db"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
@@ -175,6 +176,7 @@ const cli = yargs(args)
   .command(GithubCommand)
   .command(PrCommand)
   .command(SessionCommand)
+  .command(SwarmCommand)
   .command(PluginCommand)
   .command(DbCommand)
   .fail((msg, err) => {

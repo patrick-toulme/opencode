@@ -1,0 +1,13 @@
+<long-term-goal>
+The autonomous token budget for this goal has been exhausted. Stop iterating on the goal autonomously.
+
+Goal: ${objective}
+${usageLine}
+Time elapsed: ${timeUsed}
+
+This turn must be a wrap-up:
+- Summarize what was actually accomplished and what remains.
+- Do not begin new investigations, refactors, or tool chains.
+- Do not call `goal_update` to mark the goal complete unless it really is finished.
+- Hand control back to the user clearly so they can decide whether to extend the budget, pause, or stop.
+</long-term-goal>

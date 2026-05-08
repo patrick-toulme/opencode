@@ -17,6 +17,21 @@ export function Footer() {
     if (route.data.type !== "session") return []
     return sync.data.permission[route.data.sessionID] ?? []
   })
+  const workers = createMemo(() => {
+    if (route.data.type !== "session") return []
+    return sync.data.swarm.worker[route.data.sessionID] ?? []
+  })
+  const activeWorkers = createMemo(() =>
+    workers().filter((worker) => !["completed", "cancelled", "failed", "interrupted"].includes(worker.status)),
+  )
+  const pendingWorkerPermissions = createMemo(
+    () => activeWorkers().filter((worker) => worker.status === "waiting_permission").length,
+  )
+  const teamTasks = createMemo(() => {
+    if (route.data.type !== "session") return []
+    return sync.data.swarm.task[route.data.sessionID] ?? []
+  })
+  const openTeamTasks = createMemo(() => teamTasks().filter((task) => task.status !== "completed"))
   const directory = useDirectory()
   const connected = useConnected()
 
@@ -65,6 +80,21 @@ export function Footer() {
                 <span style={{ fg: theme.warning }}>△</span> {permissions().length} Permission
                 {permissions().length > 1 ? "s" : ""}
               </text>
+            </Show>
+            <Show when={workers().length > 0}>
+              <text fg={pendingWorkerPermissions() > 0 ? theme.warning : theme.text}>
+                <span style={{ fg: pendingWorkerPermissions() > 0 ? theme.warning : theme.success }}>◌</span>{" "}
+                {activeWorkers().length}/{workers().length} Agents
+              </text>
+            </Show>
+            <Show when={teamTasks().length > 0}>
+              <text fg={theme.text}>
+                <span style={{ fg: openTeamTasks().length > 0 ? theme.warning : theme.success }}>□</span>{" "}
+                {openTeamTasks().length}/{teamTasks().length} Tasks
+              </text>
+            </Show>
+            <Show when={workers().length > 0 || teamTasks().length > 0}>
+              <text fg={theme.textMuted}>/swarm</text>
             </Show>
             <text fg={theme.text}>
               <span style={{ fg: lsp().length > 0 ? theme.success : theme.textMuted }}>•</span> {lsp().length} LSP

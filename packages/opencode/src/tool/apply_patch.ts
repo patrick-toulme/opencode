@@ -14,6 +14,7 @@ import DESCRIPTION from "./apply_patch.txt"
 import { File } from "../file"
 import { Format } from "../format"
 import * as Bom from "@/util/bom"
+import { TeamMemory } from "@/memory/team"
 
 export const Parameters = Schema.Struct({
   patchText: Schema.String.annotate({ description: "The full patch text that describes all changes to be made" }),
@@ -184,6 +185,11 @@ export const ApplyPatchTool = Tool.define(
             break
           }
         }
+      }
+
+      for (const change of fileChanges) {
+        if (change.type === "delete") continue
+        yield* TeamMemory.assertSafeContentForPath(change.movePath ?? change.filePath, change.newContent)
       }
 
       // Build per-file metadata for UI rendering (used for both permission and result)

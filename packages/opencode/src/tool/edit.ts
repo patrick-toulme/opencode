@@ -18,6 +18,7 @@ import { Snapshot } from "@/snapshot"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import * as Bom from "@/util/bom"
+import { TeamMemory } from "@/memory/team"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -94,6 +95,7 @@ export const EditTool = Tool.define(
                 const desiredBom = source.bom || next.bom
                 contentOld = source.text
                 contentNew = next.text
+                yield* TeamMemory.assertSafeContentForPath(filePath, contentNew)
                 diff = trimDiff(createTwoFilesPatch(filePath, filePath, contentOld, contentNew))
                 yield* ctx.ask({
                   permission: "edit",
@@ -129,6 +131,7 @@ export const EditTool = Tool.define(
               const next = Bom.split(replace(contentOld, old, replacement, params.replaceAll))
               const desiredBom = source.bom || next.bom
               contentNew = next.text
+              yield* TeamMemory.assertSafeContentForPath(filePath, contentNew)
 
               diff = trimDiff(
                 createTwoFilesPatch(

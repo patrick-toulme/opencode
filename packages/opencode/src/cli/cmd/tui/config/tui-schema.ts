@@ -93,6 +93,7 @@ const SessionKeymapSection = {
   "session.rename": keymapBinding("ctrl+r"),
   "session.timeline": keymapBinding("<leader>g"),
   "session.fork": keymapBinding("none"),
+  "session.swarm": keymapBinding("none"),
   "session.compact": keymapBinding("<leader>c"),
   "session.unshare": keymapBinding("none"),
   "session.undo": keymapBinding("<leader>u"),
@@ -199,6 +200,7 @@ const DialogSelectKeymapSection = {
 
 const DialogActionsKeymapSection = {
   "dialog.action.toggle": keymapBinding("space"),
+  "dialog.action.details": keymapBinding("ctrl+o"),
   "dialog.action.delete": keymapBinding("ctrl+d"),
   "dialog.action.rename": keymapBinding("ctrl+r"),
 }

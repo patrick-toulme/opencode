@@ -39,6 +39,10 @@ import { McpAuth } from "@/mcp/auth"
 import { Command } from "@/command"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
+import { SwarmRuntime } from "@/swarm/runtime"
+import { ScheduledTask } from "@/schedule/runtime"
+import { AgentMemory } from "@/memory/agent"
+import { TeamMemory } from "@/memory/team"
 import { Format } from "@/format"
 import { InstanceLayer } from "@/project/instance-layer"
 import { Project } from "@/project/project"
@@ -92,6 +96,10 @@ export const AppLayer = Layer.mergeAll(
   McpAuth.defaultLayer,
   Command.defaultLayer,
   Truncate.defaultLayer,
+  SwarmRuntime.defaultLayer,
+  ScheduledTask.defaultLayer,
+  AgentMemory.defaultLayer,
+  TeamMemory.defaultLayer,
   ToolRegistry.defaultLayer,
   Format.defaultLayer,
   Project.defaultLayer,

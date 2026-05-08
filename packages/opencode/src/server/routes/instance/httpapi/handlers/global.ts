@@ -96,6 +96,13 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const upgrade = Effect.fn("GlobalHttpApi.upgrade")(function* (ctx: { payload: typeof GlobalUpgradeInput.Type }) {
+      if (Installation.isOpenCodeMAX()) {
+        return {
+          status: 400,
+          body: { success: false as const, error: Installation.OpenCodeMAXUpgradeMessage },
+        }
+      }
+
       const method = yield* installation.method()
       if (method === "unknown") {
         return {

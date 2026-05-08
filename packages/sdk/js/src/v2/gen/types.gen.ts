@@ -24,6 +24,24 @@ export type Event =
   | EventSessionStatus
   | EventSessionIdle
   | EventSessionCompacted
+  | EventSwarmWorkerSpawned
+  | EventSwarmWorkerStatus
+  | EventSwarmWorkerProgress
+  | EventSwarmWorkerTool
+  | EventSwarmWorkerPermission
+  | EventSwarmWorkerInputQueued1
+  | EventSwarmWorkerIdle
+  | EventSwarmWorkerStopped
+  | EventSwarmTeamCreated
+  | EventSwarmTeamUpdated
+  | EventSwarmTeamDeleted
+  | EventSwarmTaskCreated
+  | EventSwarmTaskUpdated
+  | EventSwarmTaskDeleted
+  | EventSwarmTaskCompleted
+  | EventScheduleTaskCreated
+  | EventScheduleTaskFired
+  | EventScheduleTaskDeleted
   | EventTuiPromptAppend
   | EventTuiCommandExecute
   | EventTuiToastShow1
@@ -278,6 +296,116 @@ export type SessionStatus =
       type: "busy"
     }
 
+export type SwarmWorkerState = {
+  spec: {
+    workerID: string
+    parentSessionID: string
+    sessionID: string
+    agent: string
+    name?: string
+    team?: string
+    prompt: string
+    description: string
+    outputPath?: string
+    contextStrategy: "fresh" | "fork" | "auto"
+    permissionStrategy: "bubble" | "local" | "deny"
+    executionStrategy: "oneshot" | "persistent"
+    backend: "in-process" | "worktree" | "tmux" | "iterm2" | "remote"
+    paneID?: string
+    paneExternalSession?: boolean
+    paneWindowTarget?: string
+    worktreeRoot?: string
+    worktreePath?: string
+    worktreeBranch?: string
+    remoteEndpoint?: string
+    remoteID?: string
+    remoteSessionURL?: string
+    remoteOutputPath?: string
+    model?: {
+      providerID: string
+      modelID: string
+      variant?: string
+    }
+    fork?: boolean
+    planModeRequired?: boolean
+    sourceToolCallID?: string
+    sourceMessageID?: string
+  }
+  status:
+    | "queued"
+    | "booting"
+    | "running"
+    | "waiting_permission"
+    | "waiting_input"
+    | "idle"
+    | "completed"
+    | "cancelled"
+    | "failed"
+    | "interrupted"
+  startedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  updatedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  currentTool?: {
+    name: string
+    title?: string
+  }
+  lastProgress?: string
+  pendingPermissionID?: string
+  pendingShutdownID?: string
+  pendingPlanApprovalID?: string
+  paneHidden?: boolean
+  remoteCursor?: string
+  mailboxSize?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  result?: {
+    text?: string
+    error?: string
+  }
+}
+
+export type SwarmTeamSnapshot = {
+  parentSessionID: string
+  name: string
+  description?: string
+  leadSessionID?: string
+  agentType?: string
+  createdAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  updatedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  workerIDs: Array<string>
+}
+
+export type SwarmTeamTaskState = {
+  id: string
+  parentSessionID: string
+  team?: string
+  subject: string
+  description: string
+  activeForm?: string
+  status: "pending" | "in_progress" | "completed"
+  owner?: string
+  blocks: Array<string>
+  blockedBy: Array<string>
+  metadata?: {
+    [key: string]: unknown
+  }
+  createdAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  updatedAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+}
+
+export type ScheduledTaskState = {
+  id: string
+  sessionID: string
+  parentSessionID: string
+  agent: string
+  cron: string
+  prompt: string
+  recurring: boolean
+  durable: boolean
+  createdAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  lastFiredAt?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  targetWorkerID?: string
+  targetName?: string
+  targetTeam?: string
+}
+
 export type EventTuiPromptAppend = {
   id: string
   type: "tui.prompt.append"
@@ -482,6 +610,19 @@ export type SubtaskPart = {
     modelID: string
   }
   command?: string
+}
+
+export type BtwPart = {
+  id: string
+  sessionID: string
+  messageID: string
+  type: "btw"
+  childSessionID: string
+  prompt: string
+  time: {
+    created: number
+  }
+  afterMessageID?: string
 }
 
 export type ReasoningPart = {
@@ -704,6 +845,7 @@ export type CompactionPart = {
 export type Part =
   | TextPart
   | SubtaskPart
+  | BtwPart
   | ReasoningPart
   | FilePart
   | ToolPart
@@ -763,6 +905,15 @@ export type Session = {
     snapshot?: string
     diff?: string
   }
+  goal?: {
+    objective: string
+    status: "active" | "paused" | "budget_limited" | "complete"
+    tokenBudget?: number
+    tokensUsed: number
+    timeUsedMs: number
+    timeCreated: number
+    timeUpdated: number
+  }
 }
 
 export type Prompt = {
@@ -795,6 +946,24 @@ export type GlobalEvent = {
     | EventSessionStatus
     | EventSessionIdle
     | EventSessionCompacted
+    | EventSwarmWorkerSpawned
+    | EventSwarmWorkerStatus
+    | EventSwarmWorkerProgress
+    | EventSwarmWorkerTool
+    | EventSwarmWorkerPermission
+    | EventSwarmWorkerInputQueued
+    | EventSwarmWorkerIdle
+    | EventSwarmWorkerStopped
+    | EventSwarmTeamCreated
+    | EventSwarmTeamUpdated
+    | EventSwarmTeamDeleted
+    | EventSwarmTaskCreated
+    | EventSwarmTaskUpdated
+    | EventSwarmTaskDeleted
+    | EventSwarmTaskCompleted
+    | EventScheduleTaskCreated
+    | EventScheduleTaskFired
+    | EventScheduleTaskDeleted
     | EventTuiPromptAppend
     | EventTuiCommandExecute
     | EventTuiToastShow
@@ -934,6 +1103,8 @@ export type AgentConfig = {
   temperature?: number
   top_p?: number
   prompt?: string
+  initial_prompt?: string
+  initialPrompt?: string
   tools?: {
     [key: string]: boolean
   }
@@ -941,6 +1112,9 @@ export type AgentConfig = {
   description?: string
   mode?: "subagent" | "primary" | "all"
   hidden?: boolean
+  memory?: "user" | "project" | "local"
+  background?: boolean
+  isolation?: "worktree" | "remote"
   options?: {
     [key: string]: unknown
   }
@@ -962,6 +1136,11 @@ export type AgentConfig = {
     | "subagent"
     | "primary"
     | "all"
+    | "user"
+    | "project"
+    | "local"
+    | "worktree"
+    | "remote"
     | {
         [key: string]: unknown
       }
@@ -1239,6 +1418,13 @@ export type Config = {
     openTelemetry?: boolean
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
+    team_memory?: boolean
+    team_memory_sync_url?: string
+    swarm_backend?: "auto" | "in-process" | "tmux" | "iterm2" | "remote"
+    swarm_remote_endpoint?: string
+    swarm_remote_token?: string
+    swarm_remote_trigger_endpoint?: string
+    swarm_remote_trigger_token?: string
     mcp_timeout?: number
   }
 }
@@ -1410,6 +1596,15 @@ export type GlobalSession = {
     snapshot?: string
     diff?: string
   }
+  goal?: {
+    objective: string
+    status: "active" | "paused" | "budget_limited" | "complete"
+    tokenBudget?: number
+    tokensUsed: number
+    timeUsedMs: number
+    timeCreated: number
+    timeUpdated: number
+  }
   project: ProjectSummary | null
 }
 
@@ -1520,6 +1715,9 @@ export type Agent = {
   mode: "subagent" | "primary" | "all"
   native?: boolean
   hidden?: boolean
+  memory?: "user" | "project" | "local"
+  background?: boolean
+  isolation?: "worktree" | "remote"
   topP?: number
   temperature?: number
   color?: string
@@ -1530,6 +1728,7 @@ export type Agent = {
   }
   variant?: string
   prompt?: string
+  initialPrompt?: string
   options: {
     [key: string]: unknown
   }
@@ -1680,6 +1879,17 @@ export type SubtaskPartInput = {
   command?: string
 }
 
+export type BtwPartInput = {
+  id?: string
+  type: "btw"
+  childSessionID: string
+  prompt: string
+  time: {
+    created: number
+  }
+  afterMessageID?: string
+}
+
 export type V2SessionsResponse = {
   items: Array<SessionInfo>
   cursor: {
@@ -1762,6 +1972,116 @@ export type WorkspaceWarpError = {
   data: {
     message: string
   }
+}
+
+export type SwarmWorkerState4 = {
+  spec: {
+    workerID: string
+    parentSessionID: string
+    sessionID: string
+    agent: string
+    name?: string
+    team?: string
+    prompt: string
+    description: string
+    outputPath?: string
+    contextStrategy: "fresh" | "fork" | "auto"
+    permissionStrategy: "bubble" | "local" | "deny"
+    executionStrategy: "oneshot" | "persistent"
+    backend: "in-process" | "worktree" | "tmux" | "iterm2" | "remote"
+    paneID?: string
+    paneExternalSession?: boolean
+    paneWindowTarget?: string
+    worktreeRoot?: string
+    worktreePath?: string
+    worktreeBranch?: string
+    remoteEndpoint?: string
+    remoteID?: string
+    remoteSessionURL?: string
+    remoteOutputPath?: string
+    model?: {
+      providerID: string
+      modelID: string
+      variant?: string
+    }
+    fork?: boolean
+    planModeRequired?: boolean
+    sourceToolCallID?: string
+    sourceMessageID?: string
+  }
+  status:
+    | "queued"
+    | "booting"
+    | "running"
+    | "waiting_permission"
+    | "waiting_input"
+    | "idle"
+    | "completed"
+    | "cancelled"
+    | "failed"
+    | "interrupted"
+  startedAt: number | "NaN" | "Infinity" | "-Infinity"
+  updatedAt: number | "NaN" | "Infinity" | "-Infinity"
+  currentTool?: {
+    name: string
+    title?: string
+  }
+  lastProgress?: string
+  pendingPermissionID?: string
+  pendingShutdownID?: string
+  pendingPlanApprovalID?: string
+  paneHidden?: boolean
+  remoteCursor?: string
+  mailboxSize?: number | "NaN" | "Infinity" | "-Infinity"
+  result?: {
+    text?: string
+    error?: string
+  }
+}
+
+export type SwarmTeamSnapshot3 = {
+  parentSessionID: string
+  name: string
+  description?: string
+  leadSessionID?: string
+  agentType?: string
+  createdAt: number | "NaN" | "Infinity" | "-Infinity"
+  updatedAt: number | "NaN" | "Infinity" | "-Infinity"
+  workerIDs: Array<string>
+}
+
+export type SwarmTeamTaskState3 = {
+  id: string
+  parentSessionID: string
+  team?: string
+  subject: string
+  description: string
+  activeForm?: string
+  status: "pending" | "in_progress" | "completed"
+  owner?: string
+  blocks: Array<string>
+  blockedBy: Array<string>
+  metadata?: {
+    [key: string]: unknown
+  }
+  createdAt: number | "NaN" | "Infinity" | "-Infinity"
+  updatedAt: number | "NaN" | "Infinity" | "-Infinity"
+}
+
+export type ScheduledTaskState1 = {
+  id: string
+  sessionID: string
+  parentSessionID: string
+  agent: string
+  cron: string
+  prompt: string
+  recurring: boolean
+  durable: boolean
+  createdAt: number | "NaN" | "Infinity" | "-Infinity"
+  lastFiredAt?: number | "NaN" | "Infinity" | "-Infinity"
+  targetWorkerID?: string
+  targetName?: string
+  targetTeam?: string
 }
 
 export type SyncEventMessageUpdated = {
@@ -1871,6 +2191,15 @@ export type SyncEventSessionUpdated = {
         partID?: string
         snapshot?: string
         diff?: string
+      } | null
+      goal?: {
+        objective: string
+        status: "active" | "paused" | "budget_limited" | "complete"
+        tokenBudget?: number
+        tokensUsed: number
+        timeUsedMs: number
+        timeCreated: number
+        timeUpdated: number
       } | null
     }
   }
@@ -2446,6 +2775,234 @@ export type EventSessionCompacted = {
   type: "session.compacted"
   properties: {
     sessionID: string
+  }
+}
+
+export type EventSwarmWorkerSpawned = {
+  id: string
+  type: "swarm.worker.spawned"
+  properties: {
+    workerID: string
+    parentSessionID: string
+    sessionID: string
+    agent: string
+    worker: SwarmWorkerState
+  }
+}
+
+export type EventSwarmWorkerStatus = {
+  id: string
+  type: "swarm.worker.status"
+  properties: {
+    workerID: string
+    parentSessionID: string
+    sessionID: string
+    status:
+      | "queued"
+      | "booting"
+      | "running"
+      | "waiting_permission"
+      | "waiting_input"
+      | "idle"
+      | "completed"
+      | "cancelled"
+      | "failed"
+      | "interrupted"
+    message?: string
+    worker: SwarmWorkerState
+  }
+}
+
+export type EventSwarmWorkerProgress = {
+  id: string
+  type: "swarm.worker.progress"
+  properties: {
+    workerID: string
+    parentSessionID: string
+    sessionID: string
+    message: string
+    worker: SwarmWorkerState
+  }
+}
+
+export type EventSwarmWorkerTool = {
+  id: string
+  type: "swarm.worker.tool"
+  properties: {
+    workerID: string
+    parentSessionID: string
+    sessionID: string
+    tool?: {
+      name: string
+      title?: string
+    }
+    worker: SwarmWorkerState
+  }
+}
+
+export type EventSwarmWorkerPermission = {
+  id: string
+  type: "swarm.worker.permission"
+  properties: {
+    workerID: string
+    parentSessionID: string
+    sessionID: string
+    permissionID?: string
+    worker: SwarmWorkerState
+  }
+}
+
+export type EventSwarmWorkerInputQueued = {
+  id: string
+  type: "swarm.worker.input.queued"
+  properties: {
+    workerID: string
+    parentSessionID: string
+    sessionID: string
+    inputID: string
+    from?: string
+    summary?: string
+    mailboxSize: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+    worker: SwarmWorkerState
+  }
+}
+
+export type EventSwarmWorkerIdle = {
+  id: string
+  type: "swarm.worker.idle"
+  properties: {
+    workerID: string
+    parentSessionID: string
+    sessionID: string
+    team?: string
+    idleReason?: "available" | "interrupted" | "failed"
+    summary?: string
+    completedTaskID?: string
+    completedStatus?: "resolved" | "blocked" | "failed"
+    failureReason?: string
+    worker: SwarmWorkerState
+  }
+}
+
+export type EventSwarmWorkerStopped = {
+  id: string
+  type: "swarm.worker.stopped"
+  properties: {
+    workerID: string
+    parentSessionID: string
+    sessionID: string
+    status:
+      | "queued"
+      | "booting"
+      | "running"
+      | "waiting_permission"
+      | "waiting_input"
+      | "idle"
+      | "completed"
+      | "cancelled"
+      | "failed"
+      | "interrupted"
+    reason?: string
+    worker: SwarmWorkerState
+  }
+}
+
+export type EventSwarmTeamCreated = {
+  id: string
+  type: "swarm.team.created"
+  properties: {
+    parentSessionID: string
+    name: string
+    team: SwarmTeamSnapshot
+  }
+}
+
+export type EventSwarmTeamUpdated = {
+  id: string
+  type: "swarm.team.updated"
+  properties: {
+    parentSessionID: string
+    name: string
+    team: SwarmTeamSnapshot
+  }
+}
+
+export type EventSwarmTeamDeleted = {
+  id: string
+  type: "swarm.team.deleted"
+  properties: {
+    parentSessionID: string
+    name: string
+    team: SwarmTeamSnapshot
+  }
+}
+
+export type EventSwarmTaskCreated = {
+  id: string
+  type: "swarm.task.created"
+  properties: {
+    parentSessionID: string
+    team?: string
+    task: SwarmTeamTaskState
+  }
+}
+
+export type EventSwarmTaskUpdated = {
+  id: string
+  type: "swarm.task.updated"
+  properties: {
+    parentSessionID: string
+    team?: string
+    task: SwarmTeamTaskState
+  }
+}
+
+export type EventSwarmTaskDeleted = {
+  id: string
+  type: "swarm.task.deleted"
+  properties: {
+    parentSessionID: string
+    team?: string
+    task: SwarmTeamTaskState
+  }
+}
+
+export type EventSwarmTaskCompleted = {
+  id: string
+  type: "swarm.task.completed"
+  properties: {
+    parentSessionID: string
+    team?: string
+    task: SwarmTeamTaskState
+    completedBy?: string
+  }
+}
+
+export type EventScheduleTaskCreated = {
+  id: string
+  type: "schedule.task.created"
+  properties: {
+    taskID: string
+    task: ScheduledTaskState
+  }
+}
+
+export type EventScheduleTaskFired = {
+  id: string
+  type: "schedule.task.fired"
+  properties: {
+    taskID: string
+    task: ScheduledTaskState
+    routedToWorker?: boolean
+  }
+}
+
+export type EventScheduleTaskDeleted = {
+  id: string
+  type: "schedule.task.deleted"
+  properties: {
+    taskID: string
+    task: ScheduledTaskState
   }
 }
 
@@ -3239,6 +3796,21 @@ export type SessionMessage =
   | SessionMessageShell
   | SessionMessageAssistant
   | SessionMessageCompaction
+
+export type EventSwarmWorkerInputQueued1 = {
+  id: string
+  type: "swarm.worker.input.queued"
+  properties: {
+    workerID: string
+    parentSessionID: string
+    sessionID: string
+    inputID: string
+    from?: string
+    summary?: string
+    mailboxSize: number | "NaN" | "Infinity" | "-Infinity"
+    worker: SwarmWorkerState4
+  }
+}
 
 export type EventTuiToastShow1 = {
   id: string
@@ -5402,7 +5974,7 @@ export type SessionPromptData = {
     format?: OutputFormat
     system?: string
     variant?: string
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | BtwPartInput>
   }
   path: {
     sessionID: string
@@ -5544,6 +6116,36 @@ export type SessionForkResponses = {
 
 export type SessionForkResponse = SessionForkResponses[keyof SessionForkResponses]
 
+export type SessionBtwData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/btw"
+}
+
+export type SessionBtwErrors = {
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionBtwError = SessionBtwErrors[keyof SessionBtwErrors]
+
+export type SessionBtwResponses = {
+  /**
+   * 200
+   */
+  200: Session
+}
+
+export type SessionBtwResponse = SessionBtwResponses[keyof SessionBtwResponses]
+
 export type SessionAbortData = {
   body?: never
   path: {
@@ -5577,6 +6179,113 @@ export type SessionAbortResponses = {
 }
 
 export type SessionAbortResponse = SessionAbortResponses[keyof SessionAbortResponses]
+
+export type SessionGoalClearData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/goal"
+}
+
+export type SessionGoalClearErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionGoalClearError = SessionGoalClearErrors[keyof SessionGoalClearErrors]
+
+export type SessionGoalClearResponses = {
+  /**
+   * Updated session
+   */
+  200: Session
+}
+
+export type SessionGoalClearResponse = SessionGoalClearResponses[keyof SessionGoalClearResponses]
+
+export type SessionGoalUpdateData = {
+  body?: {
+    status: "active" | "paused" | "complete"
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/goal"
+}
+
+export type SessionGoalUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionGoalUpdateError = SessionGoalUpdateErrors[keyof SessionGoalUpdateErrors]
+
+export type SessionGoalUpdateResponses = {
+  /**
+   * Updated session
+   */
+  200: Session
+}
+
+export type SessionGoalUpdateResponse = SessionGoalUpdateResponses[keyof SessionGoalUpdateResponses]
+
+export type SessionGoalSetData = {
+  body?: {
+    objective: string
+    tokenBudget?: number
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/goal"
+}
+
+export type SessionGoalSetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionGoalSetError = SessionGoalSetErrors[keyof SessionGoalSetErrors]
+
+export type SessionGoalSetResponses = {
+  /**
+   * Updated session
+   */
+  200: Session
+}
+
+export type SessionGoalSetResponse = SessionGoalSetResponses[keyof SessionGoalSetResponses]
 
 export type SessionInitData = {
   body?: {
@@ -5737,7 +6446,7 @@ export type SessionPromptAsyncData = {
     format?: OutputFormat
     system?: string
     variant?: string
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | BtwPartInput>
   }
   path: {
     sessionID: string
@@ -6047,6 +6756,486 @@ export type PartUpdateResponses = {
 }
 
 export type PartUpdateResponse = PartUpdateResponses[keyof PartUpdateResponses]
+
+export type SwarmWorkersData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{sessionID}/worker"
+}
+
+export type SwarmWorkersErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmWorkersError = SwarmWorkersErrors[keyof SwarmWorkersErrors]
+
+export type SwarmWorkersResponses = {
+  /**
+   * Subagent workers
+   */
+  200: Array<SwarmWorkerState>
+}
+
+export type SwarmWorkersResponse = SwarmWorkersResponses[keyof SwarmWorkersResponses]
+
+export type SwarmTeamsData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{sessionID}/team"
+}
+
+export type SwarmTeamsErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmTeamsError = SwarmTeamsErrors[keyof SwarmTeamsErrors]
+
+export type SwarmTeamsResponses = {
+  /**
+   * Subagent teams
+   */
+  200: Array<SwarmTeamSnapshot>
+}
+
+export type SwarmTeamsResponse = SwarmTeamsResponses[keyof SwarmTeamsResponses]
+
+export type SwarmTeamCreateData = {
+  body?: {
+    team_name: string
+    description?: string
+    agent_type?: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{sessionID}/team"
+}
+
+export type SwarmTeamCreateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmTeamCreateError = SwarmTeamCreateErrors[keyof SwarmTeamCreateErrors]
+
+export type SwarmTeamCreateResponses = {
+  /**
+   * Created subagent team
+   */
+  200: SwarmTeamSnapshot
+}
+
+export type SwarmTeamCreateResponse = SwarmTeamCreateResponses[keyof SwarmTeamCreateResponses]
+
+export type SwarmWorkerMessageData = {
+  body?: {
+    message: string
+    summary?: string
+  }
+  path: {
+    sessionID: string
+    target: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{sessionID}/worker/{target}/message"
+}
+
+export type SwarmWorkerMessageErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SwarmWorkerMessageError = SwarmWorkerMessageErrors[keyof SwarmWorkerMessageErrors]
+
+export type SwarmWorkerMessageResponses = {
+  /**
+   * Queued subagent message
+   */
+  200: {
+    inputID: string
+  }
+}
+
+export type SwarmWorkerMessageResponse = SwarmWorkerMessageResponses[keyof SwarmWorkerMessageResponses]
+
+export type SwarmWorkerCancelData = {
+  body?: never
+  path: {
+    sessionID: string
+    target: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{sessionID}/worker/{target}/cancel"
+}
+
+export type SwarmWorkerCancelErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SwarmWorkerCancelError = SwarmWorkerCancelErrors[keyof SwarmWorkerCancelErrors]
+
+export type SwarmWorkerCancelResponses = {
+  /**
+   * Cancelled subagent worker
+   */
+  200: SwarmWorkerState
+}
+
+export type SwarmWorkerCancelResponse = SwarmWorkerCancelResponses[keyof SwarmWorkerCancelResponses]
+
+export type SwarmWorkerStopData = {
+  body?: never
+  path: {
+    sessionID: string
+    target: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{sessionID}/worker/{target}/stop"
+}
+
+export type SwarmWorkerStopErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SwarmWorkerStopError = SwarmWorkerStopErrors[keyof SwarmWorkerStopErrors]
+
+export type SwarmWorkerStopResponses = {
+  /**
+   * Stopped subagent worker
+   */
+  200: SwarmWorkerState
+}
+
+export type SwarmWorkerStopResponse = SwarmWorkerStopResponses[keyof SwarmWorkerStopResponses]
+
+export type SwarmWorkerPaneData = {
+  body?: never
+  path: {
+    sessionID: string
+    target: string
+    action: "hide" | "show"
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{sessionID}/worker/{target}/pane/{action}"
+}
+
+export type SwarmWorkerPaneErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SwarmWorkerPaneError = SwarmWorkerPaneErrors[keyof SwarmWorkerPaneErrors]
+
+export type SwarmWorkerPaneResponses = {
+  /**
+   * Updated subagent worker pane
+   */
+  200: SwarmWorkerState
+}
+
+export type SwarmWorkerPaneResponse = SwarmWorkerPaneResponses[keyof SwarmWorkerPaneResponses]
+
+export type SwarmTeamDeleteData = {
+  body?: never
+  path: {
+    sessionID: string
+    teamName: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    cancel_workers?: "true" | "false"
+  }
+  url: "/swarm/{sessionID}/team/{teamName}"
+}
+
+export type SwarmTeamDeleteErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SwarmTeamDeleteError = SwarmTeamDeleteErrors[keyof SwarmTeamDeleteErrors]
+
+export type SwarmTeamDeleteResponses = {
+  /**
+   * Deleted subagent team
+   */
+  200: SwarmTeamSnapshot
+}
+
+export type SwarmTeamDeleteResponse = SwarmTeamDeleteResponses[keyof SwarmTeamDeleteResponses]
+
+export type SwarmTeamBroadcastData = {
+  body?: {
+    message: string
+    summary?: string
+  }
+  path: {
+    sessionID: string
+    teamName: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{sessionID}/team/{teamName}/broadcast"
+}
+
+export type SwarmTeamBroadcastErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SwarmTeamBroadcastError = SwarmTeamBroadcastErrors[keyof SwarmTeamBroadcastErrors]
+
+export type SwarmTeamBroadcastResponses = {
+  /**
+   * Queued broadcast messages
+   */
+  200: {
+    inputIDs: Array<string>
+  }
+}
+
+export type SwarmTeamBroadcastResponse = SwarmTeamBroadcastResponses[keyof SwarmTeamBroadcastResponses]
+
+export type SwarmTasksData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    team?: string
+    status?: "pending" | "in_progress" | "completed"
+    owner?: string
+  }
+  url: "/swarm/{sessionID}/task"
+}
+
+export type SwarmTasksErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmTasksError = SwarmTasksErrors[keyof SwarmTasksErrors]
+
+export type SwarmTasksResponses = {
+  /**
+   * Shared team tasks
+   */
+  200: Array<SwarmTeamTaskState>
+}
+
+export type SwarmTasksResponse = SwarmTasksResponses[keyof SwarmTasksResponses]
+
+export type SwarmTaskCreateData = {
+  body?: {
+    team?: string
+    subject: string
+    description: string
+    active_form?: string
+    owner?: string
+    metadata?: {
+      [key: string]: unknown
+    }
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{sessionID}/task"
+}
+
+export type SwarmTaskCreateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmTaskCreateError = SwarmTaskCreateErrors[keyof SwarmTaskCreateErrors]
+
+export type SwarmTaskCreateResponses = {
+  /**
+   * Created shared subagent task
+   */
+  200: SwarmTeamTaskState
+}
+
+export type SwarmTaskCreateResponse = SwarmTaskCreateResponses[keyof SwarmTaskCreateResponses]
+
+export type SwarmTaskGetData = {
+  body?: never
+  path: {
+    sessionID: string
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+    team?: string
+    status?: "pending" | "in_progress" | "completed"
+    owner?: string
+  }
+  url: "/swarm/{sessionID}/task/{taskID}"
+}
+
+export type SwarmTaskGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SwarmTaskGetError = SwarmTaskGetErrors[keyof SwarmTaskGetErrors]
+
+export type SwarmTaskGetResponses = {
+  /**
+   * Shared subagent task
+   */
+  200: SwarmTeamTaskState
+}
+
+export type SwarmTaskGetResponse = SwarmTaskGetResponses[keyof SwarmTaskGetResponses]
+
+export type SwarmTaskUpdateData = {
+  body?: {
+    team?: string
+    subject?: string
+    description?: string
+    active_form?: string
+    status?: "pending" | "in_progress" | "completed" | "deleted"
+    owner?: string
+    add_blocks?: Array<string>
+    add_blocked_by?: Array<string>
+    metadata?: {
+      [key: string]: unknown
+    }
+  }
+  path: {
+    sessionID: string
+    taskID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/swarm/{sessionID}/task/{taskID}"
+}
+
+export type SwarmTaskUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type SwarmTaskUpdateError = SwarmTaskUpdateErrors[keyof SwarmTaskUpdateErrors]
+
+export type SwarmTaskUpdateResponses = {
+  /**
+   * Updated shared subagent task
+   */
+  200: {
+    success: boolean
+    taskID: string
+    updatedFields: Array<string>
+    task?: SwarmTeamTaskState
+    deleted?: SwarmTeamTaskState
+    error?: string
+    statusChange?: {
+      from: "pending" | "in_progress" | "completed"
+      to: "pending" | "in_progress" | "completed" | "deleted"
+    }
+  }
+}
+
+export type SwarmTaskUpdateResponse = SwarmTaskUpdateResponses[keyof SwarmTaskUpdateResponses]
 
 export type SyncStartData = {
   body?: never

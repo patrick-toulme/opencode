@@ -7,6 +7,25 @@ import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
+import { ListPeersTool, SendMessageTool } from "./send_message"
+import { DeleteScheduledTaskTool, ListScheduledTasksTool, ScheduleTaskTool } from "./schedule"
+import { RemoteTriggerTool } from "./remote_trigger"
+import {
+  BroadcastTool,
+  CancelTaskTool,
+  ControlTaskPaneTool,
+  CreateTaskTool,
+  CreateTeamTool,
+  DeleteTeamTool,
+  GetTaskTool,
+  ListTasksTool,
+  ListTeamsTool,
+  ListTeamTasksTool,
+  ReadTaskOutputTool,
+  StopTaskTool,
+  UpdateTaskTool,
+  WaitTaskTool,
+} from "./task_control"
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
@@ -27,6 +46,7 @@ import * as Log from "@opencode-ai/core/util/log"
 import { LspTool } from "./lsp"
 import * as Truncate from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
+import { GoalCreateTool, GoalUpdateTool } from "./goal"
 import { Glob } from "@opencode-ai/core/util/glob"
 import path from "path"
 import { pathToFileURL } from "url"
@@ -46,6 +66,8 @@ import { Bus } from "../bus"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
 import { Permission } from "@/permission"
+import { SwarmRuntime } from "@/swarm/runtime"
+import { ScheduledTask } from "@/schedule/runtime"
 
 const log = Log.create({ service: "tool.registry" })
 
@@ -88,6 +110,9 @@ export const layer: Layer.Layer<
   | Ripgrep.Service
   | Format.Service
   | Truncate.Service
+  | SwarmRuntime.Service
+  | ScheduledTask.Service
+  | Permission.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -99,6 +124,26 @@ export const layer: Layer.Layer<
 
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
+    const sendMessage = yield* SendMessageTool
+    const listPeers = yield* ListPeersTool
+    const scheduleTask = yield* ScheduleTaskTool
+    const listScheduledTasks = yield* ListScheduledTasksTool
+    const deleteScheduledTask = yield* DeleteScheduledTaskTool
+    const remoteTrigger = yield* RemoteTriggerTool
+    const broadcast = yield* BroadcastTool
+    const createTeam = yield* CreateTeamTool
+    const listTeams = yield* ListTeamsTool
+    const deleteTeam = yield* DeleteTeamTool
+    const createTask = yield* CreateTaskTool
+    const updateTask = yield* UpdateTaskTool
+    const getTask = yield* GetTaskTool
+    const listTeamTasks = yield* ListTeamTasksTool
+    const listTasks = yield* ListTasksTool
+    const waitTask = yield* WaitTaskTool
+    const cancelTask = yield* CancelTaskTool
+    const controlTaskPane = yield* ControlTaskPaneTool
+    const stopTask = yield* StopTaskTool
+    const readTaskOutput = yield* ReadTaskOutputTool
     const read = yield* ReadTool
     const question = yield* QuestionTool
     const todo = yield* TodoWriteTool
@@ -113,6 +158,8 @@ export const layer: Layer.Layer<
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
+    const goalcreate = yield* GoalCreateTool
+    const goalupdate = yield* GoalUpdateTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -202,6 +249,26 @@ export const layer: Layer.Layer<
           edit: Tool.init(edit),
           write: Tool.init(writetool),
           task: Tool.init(task),
+          sendMessage: Tool.init(sendMessage),
+          listPeers: Tool.init(listPeers),
+          scheduleTask: Tool.init(scheduleTask),
+          listScheduledTasks: Tool.init(listScheduledTasks),
+          deleteScheduledTask: Tool.init(deleteScheduledTask),
+          remoteTrigger: Tool.init(remoteTrigger),
+          broadcast: Tool.init(broadcast),
+          createTeam: Tool.init(createTeam),
+          listTeams: Tool.init(listTeams),
+          deleteTeam: Tool.init(deleteTeam),
+          createTask: Tool.init(createTask),
+          updateTask: Tool.init(updateTask),
+          getTask: Tool.init(getTask),
+          listTeamTasks: Tool.init(listTeamTasks),
+          listTasks: Tool.init(listTasks),
+          waitTask: Tool.init(waitTask),
+          cancelTask: Tool.init(cancelTask),
+          controlTaskPane: Tool.init(controlTaskPane),
+          stopTask: Tool.init(stopTask),
+          readTaskOutput: Tool.init(readTaskOutput),
           fetch: Tool.init(webfetch),
           todo: Tool.init(todo),
           search: Tool.init(websearch),
@@ -210,6 +277,8 @@ export const layer: Layer.Layer<
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
+          goalCreate: Tool.init(goalcreate),
+          goalUpdate: Tool.init(goalupdate),
         })
 
         return {
@@ -224,11 +293,33 @@ export const layer: Layer.Layer<
             tool.edit,
             tool.write,
             tool.task,
+            tool.sendMessage,
+            tool.listPeers,
+            tool.scheduleTask,
+            tool.listScheduledTasks,
+            tool.deleteScheduledTask,
+            tool.remoteTrigger,
+            tool.broadcast,
+            tool.createTeam,
+            tool.listTeams,
+            tool.deleteTeam,
+            tool.createTask,
+            tool.updateTask,
+            tool.getTask,
+            tool.listTeamTasks,
+            tool.listTasks,
+            tool.waitTask,
+            tool.cancelTask,
+            tool.controlTaskPane,
+            tool.stopTask,
+            tool.readTaskOutput,
             tool.fetch,
             tool.todo,
             tool.search,
             tool.skill,
             tool.patch,
+            tool.goalCreate,
+            tool.goalUpdate,
             ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [tool.plan] : []),
           ],
@@ -350,6 +441,9 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(Ripgrep.defaultLayer),
     Layer.provide(Truncate.defaultLayer),
+    Layer.provide(SwarmRuntime.defaultLayer),
+    Layer.provide(ScheduledTask.defaultLayer),
+    Layer.provide(Permission.defaultLayer),
   ),
 )
 

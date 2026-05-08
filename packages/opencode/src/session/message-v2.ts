@@ -239,6 +239,20 @@ export const SubtaskPart = Schema.Struct({
   .pipe(withStatics((s) => ({ zod: zod(s) })))
 export type SubtaskPart = Types.DeepMutable<Schema.Schema.Type<typeof SubtaskPart>>
 
+export const BtwPart = Schema.Struct({
+  ...partBase,
+  type: Schema.Literal("btw"),
+  childSessionID: SessionID,
+  prompt: Schema.String,
+  time: Schema.Struct({
+    created: NonNegativeInt,
+  }),
+  afterMessageID: Schema.optional(MessageID),
+})
+  .annotate({ identifier: "BtwPart" })
+  .pipe(withStatics((s) => ({ zod: zod(s) })))
+export type BtwPart = Types.DeepMutable<Schema.Schema.Type<typeof BtwPart>>
+
 export const RetryPart = Schema.Struct({
   ...partBase,
   type: Schema.Literal("retry"),
@@ -405,6 +419,7 @@ export type User = Types.DeepMutable<Schema.Schema.Type<typeof User>>
 const _Part = Schema.Union([
   TextPart,
   SubtaskPart,
+  BtwPart,
   ReasoningPart,
   FilePart,
   ToolPart,
@@ -420,6 +435,7 @@ export const Part = Object.assign(_Part, {
   zod: zod(_Part) as unknown as z.ZodType<
     | TextPart
     | SubtaskPart
+    | BtwPart
     | ReasoningPart
     | FilePart
     | ToolPart
@@ -435,6 +451,7 @@ export const Part = Object.assign(_Part, {
 export type Part =
   | TextPart
   | SubtaskPart
+  | BtwPart
   | ReasoningPart
   | FilePart
   | ToolPart
@@ -542,6 +559,20 @@ export const SubtaskPartInput = Schema.Struct({
   .annotate({ identifier: "SubtaskPartInput" })
   .pipe(withStatics((s) => ({ zod: zod(s) })))
 export type SubtaskPartInput = Types.DeepMutable<Schema.Schema.Type<typeof SubtaskPartInput>>
+
+export const BtwPartInput = Schema.Struct({
+  id: Schema.optional(PartID),
+  type: Schema.Literal("btw"),
+  childSessionID: SessionID,
+  prompt: Schema.String,
+  time: Schema.Struct({
+    created: NonNegativeInt,
+  }),
+  afterMessageID: Schema.optional(MessageID),
+})
+  .annotate({ identifier: "BtwPartInput" })
+  .pipe(withStatics((s) => ({ zod: zod(s) })))
+export type BtwPartInput = Types.DeepMutable<Schema.Schema.Type<typeof BtwPartInput>>
 
 export const Assistant = Schema.Struct({
   ...messageBase,
@@ -833,6 +864,10 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             text: "The following tool was executed by the user",
           })
         }
+
+        // Inline /btw threads are UI-only markers. The child session has the
+        // actual side conversation; the parent model context should stay clean.
+        if (part.type === "btw") continue
       }
     }
 

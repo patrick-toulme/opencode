@@ -35,6 +35,15 @@ export const SessionTable = sqliteTable(
     summary_diffs: text({ mode: "json" }).$type<Snapshot.FileDiff[]>(),
     revert: text({ mode: "json" }).$type<{ messageID: MessageID; partID?: PartID; snapshot?: string; diff?: string }>(),
     permission: text({ mode: "json" }).$type<Permission.Ruleset>(),
+    goal: text({ mode: "json" }).$type<{
+      objective: string
+      status: "active" | "paused" | "budget_limited" | "complete"
+      tokenBudget?: number
+      tokensUsed: number
+      timeUsedMs: number
+      timeCreated: number
+      timeUpdated: number
+    }>(),
     agent: text(),
     model: text({ mode: "json" }).$type<{
       id: string

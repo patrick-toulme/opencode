@@ -287,6 +287,33 @@ export const Info = Schema.Struct({
       continue_loop_on_deny: Schema.optional(Schema.Boolean).annotate({
         description: "Continue the agent loop when a tool call is denied",
       }),
+      team_memory: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Enable shared project-scoped team memory for the lead agent and subagents, even before a team MEMORY.md file exists.",
+      }),
+      team_memory_sync_url: Schema.optional(Schema.String).annotate({
+        description:
+          "Optional HTTP endpoint for shared team memory sync. opencode sends project-scoped GET/PUT requests with team memory entries.",
+      }),
+      swarm_backend: Schema.optional(Schema.Literals(["auto", "in-process", "tmux", "iterm2", "remote"])).annotate({
+        description:
+          'Subagent execution backend. "auto" prefers visible tmux/iTerm panes when available and falls back to in-process.',
+      }),
+      swarm_remote_endpoint: Schema.optional(Schema.String).annotate({
+        description:
+          'HTTP endpoint for remote subagent execution. Required when task isolation is "remote" or swarm_backend is "remote".',
+      }),
+      swarm_remote_token: Schema.optional(Schema.String).annotate({
+        description: "Optional bearer token for the remote subagent execution endpoint.",
+      }),
+      swarm_remote_trigger_endpoint: Schema.optional(Schema.String).annotate({
+        description:
+          "Optional HTTP endpoint for remote scheduled agent triggers. Defaults to the remote subagent execution endpoint when omitted.",
+      }),
+      swarm_remote_trigger_token: Schema.optional(Schema.String).annotate({
+        description:
+          "Optional bearer token for the remote scheduled agent trigger endpoint. Defaults to the remote subagent token when omitted.",
+      }),
       mcp_timeout: Schema.optional(PositiveInt).annotate({
         description: "Timeout in milliseconds for model context protocol (MCP) requests",
       }),

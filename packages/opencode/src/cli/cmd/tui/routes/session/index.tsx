@@ -21,7 +21,7 @@ import { useEvent } from "@tui/context/event"
 import { SplitBorder } from "@tui/component/border"
 import { Spinner } from "@tui/component/spinner"
 import { selectedForeground, useTheme } from "@tui/context/theme"
-import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, RGBA } from "@opentui/core"
+import { BoxRenderable, ScrollBoxRenderable, TextareaRenderable, addDefaultParsers, TextAttributes, RGBA } from "@opentui/core"
 import { Prompt, type PromptRef } from "@tui/component/prompt"
 import type {
   AssistantMessage,
@@ -31,6 +31,7 @@ import type {
   UserMessage,
   TextPart,
   ReasoningPart,
+  BtwPart,
 } from "@opencode-ai/sdk/v2"
 import { useLocal } from "@tui/context/local"
 import { Locale } from "@/util/locale"
@@ -60,6 +61,7 @@ import type { PromptInfo } from "../../component/prompt/history"
 import { DialogConfirm } from "@tui/ui/dialog-confirm"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
+import { DialogSwarm } from "./dialog-swarm"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
 import { Sidebar } from "./sidebar"
 import { SubagentFooter } from "./subagent-footer.tsx"
@@ -90,6 +92,7 @@ import { SessionRetry } from "@/session/retry"
 import { getRevertDiffFiles } from "../../util/revert-diff"
 import { useCommandPalette } from "../../context/command-palette"
 import { useBindings, useCommandShortcut } from "../../keymap"
+import { MessageID, PartID } from "@/session/schema"
 
 addDefaultParsers(parsers.parsers)
 
@@ -477,6 +480,22 @@ export function Session() {
             sessionID={route.sessionID}
           />
         ))
+      },
+    },
+    {
+      title: "View subagent swarm",
+      value: "session.swarm",
+      category: "Session",
+      suggested:
+        (sync.data.swarm.worker[route.sessionID]?.length ?? 0) > 0 ||
+        (sync.data.swarm.team[route.sessionID]?.length ?? 0) > 0 ||
+        (sync.data.swarm.task[route.sessionID]?.length ?? 0) > 0,
+      slash: {
+        name: "swarm",
+        aliases: ["agents", "tasks"],
+      },
+      run: () => {
+        dialog.replace(() => <DialogSwarm sessionID={route.sessionID} />)
       },
     },
     {
@@ -1257,6 +1276,7 @@ function UserMessage(props: {
   const metadataVisible = createMemo(() => queued() || ctx.showTimestamps())
 
   const compaction = createMemo(() => props.parts.find((x) => x.type === "compaction"))
+  const btwParts = createMemo(() => props.parts.filter((x): x is BtwPart => x.type === "btw"))
 
   return (
     <>
@@ -1330,7 +1350,207 @@ function UserMessage(props: {
           borderColor={theme.borderActive}
         />
       </Show>
+      <For each={btwParts()}>{(part) => <BtwThreadPart part={part} />}</For>
     </>
+  )
+}
+
+function BtwThreadPart(props: { part: BtwPart }) {
+  const ctx = use()
+  const sync = useSync()
+  const { navigate } = useRoute()
+  const { theme } = useTheme()
+  const [collapsed, setCollapsed] = createSignal(false)
+  const childID = createMemo(() => props.part.childSessionID)
+
+  createEffect(
+    on(childID, (sessionID) => {
+      void sync.session.sync(sessionID).catch(() => {})
+    }),
+  )
+
+  const child = createMemo(() => sync.session.get(childID()))
+  const title = createMemo(() => (child()?.title ?? "btw thread").replace(/^btw:\s*/i, ""))
+  const messages = createMemo(() => {
+    const after = props.part.afterMessageID
+    return (sync.data.message[childID()] ?? []).filter((message) => {
+      if (after) return message.id > after
+      return message.time.created >= props.part.time.created
+    })
+  })
+  const lastAssistant = createMemo(() => messages().findLast((message) => message.role === "assistant")?.id)
+  const pending = createMemo(() => messages().findLast((message) => message.role === "assistant" && !message.time.completed)?.id)
+  const status = createMemo(() => sync.session.status(childID()))
+  const height = createMemo(() => {
+    if (messages().length === 0) return 4
+    return Math.min(18, Math.max(6, messages().length * 4))
+  })
+
+  return (
+    <box id={"btw-" + props.part.id} marginTop={1} paddingLeft={3} flexShrink={0}>
+      <box
+        border={["left"]}
+        customBorderChars={SplitBorder.customBorderChars}
+        borderColor={theme.accent}
+        backgroundColor={theme.backgroundPanel}
+      >
+        <box paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} gap={1}>
+          <box flexDirection="row" justifyContent="space-between" gap={2}>
+            <box flexDirection="row" gap={1} flexShrink={1}>
+              <text fg={theme.accent}>BTW</text>
+              <text fg={theme.textMuted}>·</text>
+              <text fg={theme.text}>{title()}</text>
+              <Show when={status() !== "idle"}>
+                <text fg={theme.textMuted}>· {status()}</text>
+              </Show>
+            </box>
+            <box flexDirection="row" gap={1} flexShrink={0}>
+              <box onMouseUp={() => setCollapsed((value) => !value)}>
+                <text fg={theme.textMuted}>{collapsed() ? "expand" : "collapse"}</text>
+              </box>
+              <text fg={theme.textMuted}>·</text>
+              <box onMouseUp={() => navigate({ type: "session", sessionID: childID() })}>
+                <text fg={theme.textMuted}>open</text>
+              </box>
+            </box>
+          </box>
+          <Show when={props.part.prompt.trim()}>
+            <text fg={theme.textMuted}>Initial aside: {props.part.prompt.trim()}</text>
+          </Show>
+          <Show when={!collapsed()}>
+            <Show
+              when={messages().length > 0}
+              fallback={<text fg={theme.textMuted}>No side-thread messages yet.</text>}
+            >
+              <scrollbox
+                height={height()}
+                viewportOptions={{ paddingRight: 1 }}
+                stickyScroll={true}
+                stickyStart="bottom"
+                scrollAcceleration={getScrollAcceleration(ctx.tui)}
+              >
+                <For each={messages()}>
+                  {(message, index) => (
+                    <Switch>
+                      <Match when={message.role === "user"}>
+                        <UserMessage
+                          index={index()}
+                          onMouseUp={() => {}}
+                          message={message as UserMessage}
+                          parts={sync.data.part[message.id] ?? []}
+                          pending={pending()}
+                        />
+                      </Match>
+                      <Match when={message.role === "assistant"}>
+                        <AssistantMessage
+                          last={lastAssistant() === message.id}
+                          message={message as AssistantMessage}
+                          parts={sync.data.part[message.id] ?? []}
+                        />
+                      </Match>
+                    </Switch>
+                  )}
+                </For>
+              </scrollbox>
+            </Show>
+            <BtwMiniPrompt sessionID={childID()} />
+          </Show>
+        </box>
+      </box>
+    </box>
+  )
+}
+
+function BtwMiniPrompt(props: { sessionID: string }) {
+  const sdk = useSDK()
+  const sync = useSync()
+  const local = useLocal()
+  const toast = useToast()
+  const { theme, syntax } = useTheme()
+  let input: TextareaRenderable | undefined
+  const [value, setValue] = createSignal("")
+  const [sending, setSending] = createSignal(false)
+  const child = createMemo(() => sync.session.get(props.sessionID))
+  const status = createMemo(() => sync.session.status(props.sessionID))
+  const disabled = createMemo(() => sending() || status() !== "idle")
+
+  const submit = async () => {
+    const text = value().trim()
+    if (!text || disabled()) return
+
+    const sessionModel = child()?.model
+    const fallbackModel = local.model.current()
+    const model = sessionModel ? { providerID: sessionModel.providerID, modelID: sessionModel.id } : fallbackModel
+    const agent = child()?.agent ?? local.agent.current()?.name
+    if (!agent || !model) {
+      toast.show({ message: "No model selected for /btw reply", variant: "error" })
+      return
+    }
+
+    setSending(true)
+    input?.clear()
+    setValue("")
+    try {
+      const result = await sdk.client.session.prompt({
+        sessionID: props.sessionID,
+        messageID: MessageID.ascending(),
+        agent,
+        model,
+        variant: sessionModel?.variant ?? local.model.variant.current(),
+        parts: [
+          {
+            id: PartID.ascending(),
+            type: "text",
+            text,
+          },
+        ],
+      })
+      if (result.error) {
+        input?.setText(text)
+        setValue(text)
+        toast.show({ message: "Failed to send /btw reply", variant: "error" })
+      }
+    } catch {
+      input?.setText(text)
+      setValue(text)
+      toast.show({ message: "Failed to send /btw reply", variant: "error" })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <box
+      border={["left"]}
+      borderColor={disabled() ? theme.border : theme.accent}
+      customBorderChars={SplitBorder.customBorderChars}
+      marginTop={1}
+    >
+      <box paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1} backgroundColor={theme.backgroundElement}>
+        <textarea
+          ref={(r: TextareaRenderable) => {
+            input = r
+          }}
+          minHeight={1}
+          maxHeight={4}
+          placeholder={disabled() ? "btw is responding..." : "Reply in this btw thread..."}
+          placeholderColor={theme.textMuted}
+          textColor={disabled() ? theme.textMuted : theme.text}
+          focusedTextColor={theme.text}
+          focusedBackgroundColor={theme.backgroundElement}
+          cursorColor={disabled() ? theme.backgroundElement : theme.text}
+          syntaxStyle={syntax()}
+          onContentChange={() => setValue(input?.plainText ?? "")}
+          onKeyDown={(event: { preventDefault(): void }) => {
+            if (disabled()) event.preventDefault()
+          }}
+          onSubmit={() => {
+            setTimeout(() => setTimeout(() => void submit(), 0), 0)
+          }}
+          onMouseDown={() => input?.focus()}
+        />
+      </box>
+    </box>
   )
 }
 
@@ -1951,6 +2171,13 @@ function Task(props: ToolProps<typeof TaskTool>) {
   })
 
   const messages = createMemo(() => sync.data.message[props.metadata.sessionId ?? ""] ?? [])
+  const worker = createMemo(() => {
+    const workerID = props.metadata.workerId
+    const sessionID = props.metadata.sessionId
+    return Object.values(sync.data.swarm.worker)
+      .flat()
+      .find((item) => (workerID ? item.spec.workerID === workerID : item.spec.sessionID === sessionID))
+  })
 
   const tools = createMemo(() => {
     return messages().flatMap((msg) =>
@@ -1976,8 +2203,17 @@ function Task(props: ToolProps<typeof TaskTool>) {
   const content = createMemo(() => {
     if (!props.input.description) return ""
     let content = [`${Locale.titlecase(props.input.subagent_type ?? "General")} Task — ${props.input.description}`]
+    const workerState = worker()
 
-    if (isRunning() && tools().length > 0) {
+    if (workerState) content[0] += ` · ${workerState.status.replaceAll("_", " ")}`
+
+    if (workerState?.currentTool) {
+      content.push(
+        `↳ ${Locale.titlecase(workerState.currentTool.name)}${
+          workerState.currentTool.title ? ` ${workerState.currentTool.title}` : ""
+        }`,
+      )
+    } else if (isRunning() && tools().length > 0) {
       // content[0] += ` · ${tools().length} toolcalls`
       if (current()) {
         const state = current()!.state

@@ -120,6 +120,88 @@ describe("session.llm.hasToolCalls", () => {
   })
 })
 
+describe("session.llm.repairCompatibleToolCall", () => {
+  test("exposes PascalCase compatibility tool aliases for canonical opencode tools", () => {
+    expect(LLM.compatibleToolAliasesFor("task")).toEqual(["Agent", "Task"])
+    expect(LLM.compatibleToolAliasesFor("read_task_output")).toEqual(["TaskOutput"])
+    expect(LLM.compatibleToolAliasesFor("remote_trigger")).toEqual(["RemoteTrigger"])
+    expect(LLM.compatibleToolAliasesFor("missing")).toEqual([])
+    expect(LLM.canonicalToolName("TaskCreate")).toBe("create_task")
+    expect(LLM.canonicalToolName("task")).toBe("task")
+  })
+
+  test("maps compatibility Agent calls to opencode task with teamName alias normalized", () => {
+    const repaired = LLM.repairCompatibleToolCall(
+      "Agent",
+      JSON.stringify({ description: "scan auth", prompt: "inspect auth", teamName: "red" }),
+      { task: {} },
+    )
+    expect(repaired?.toolName).toBe("task")
+    expect(JSON.parse(repaired?.input as string)).toEqual({
+      description: "scan auth",
+      prompt: "inspect auth",
+      team_name: "red",
+    })
+  })
+
+  test("maps compatibility task-board calls to the shared task tools", () => {
+    const create = LLM.repairCompatibleToolCall(
+      "TaskCreate",
+      JSON.stringify({ subject: "tests", description: "add tests", activeForm: "Adding tests" }),
+      { create_task: {} },
+    )
+    expect(create?.toolName).toBe("create_task")
+    expect(JSON.parse(create?.input as string)).toEqual({
+      subject: "tests",
+      description: "add tests",
+      active_form: "Adding tests",
+    })
+
+    const update = LLM.repairCompatibleToolCall(
+      "TaskUpdate",
+      JSON.stringify({ taskId: "task_1", addBlocks: ["task_2"], addBlockedBy: ["task_0"] }),
+      { update_task: {} },
+    )
+    expect(update?.toolName).toBe("update_task")
+    expect(JSON.parse(update?.input as string)).toEqual({
+      task_id: "task_1",
+      add_blocks: ["task_2"],
+      add_blocked_by: ["task_0"],
+    })
+  })
+
+  test("maps compatibility TaskOutput to read_task_output with blocking timeout semantics", () => {
+    const repaired = LLM.repairCompatibleToolCall(
+      "TaskOutput",
+      JSON.stringify({ task_id: "ses_1", block: true, timeout: 2500 }),
+      { read_task_output: {} },
+    )
+    expect(repaired?.toolName).toBe("read_task_output")
+    expect(JSON.parse(repaired?.input as string)).toEqual({
+      task_id: "ses_1",
+      block: true,
+      timeout_ms: 2500,
+    })
+  })
+
+  test("maps compatibility RemoteTrigger to remote_trigger with triggerId normalized", () => {
+    const repaired = LLM.repairCompatibleToolCall(
+      "RemoteTrigger",
+      JSON.stringify({ action: "run", triggerId: "trigger-1" }),
+      { remote_trigger: {} },
+    )
+    expect(repaired?.toolName).toBe("remote_trigger")
+    expect(JSON.parse(repaired?.input as string)).toEqual({
+      action: "run",
+      trigger_id: "trigger-1",
+    })
+  })
+
+  test("does not repair aliases whose target tool is unavailable", () => {
+    expect(LLM.repairCompatibleToolCall("TaskCreate", JSON.stringify({ subject: "x" }), {})).toBeUndefined()
+  })
+})
+
 type Capture = {
   url: URL
   headers: Headers
@@ -558,6 +640,97 @@ describe("session.llm.stream", () => {
         const capture = await request
         const tools = capture.body.tools as Array<{ function?: { name?: string } }> | undefined
         expect(tools?.some((item) => item.function?.name === "question")).toBe(true)
+      },
+    })
+  })
+
+  test("filters compatibility aliases when the canonical tool is disabled", async () => {
+    const server = state.server
+    if (!server) {
+      throw new Error("Server not initialized")
+    }
+
+    const providerID = "alibaba"
+    const modelID = "qwen-plus"
+    const fixture = await loadFixture(providerID, modelID)
+    const model = fixture.model
+
+    const request = waitRequest(
+      "/chat/completions",
+      new Response(createChatStream("Hello"), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    )
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: [providerID],
+            provider: {
+              [providerID]: {
+                options: {
+                  apiKey: "test-key",
+                  baseURL: `${server.url.origin}/v1`,
+                },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await WithInstance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await getModel(ProviderID.make(providerID), ModelID.make(model.id))
+        const sessionID = SessionID.make("session-test-tools-alias")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+
+        const user = {
+          id: MessageID.make("user-tools-alias"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
+        } satisfies MessageV2.User
+
+        const taskTool = tool({
+          description: "Spawn a worker",
+          inputSchema: z.object({}),
+          execute: async () => ({ output: "" }),
+        })
+
+        await drain({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          permission: [{ permission: "task", pattern: "*", action: "deny" }],
+          system: ["You are a helpful assistant."],
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {
+            task: taskTool,
+            Task: taskTool,
+            Agent: taskTool,
+          },
+        })
+
+        const capture = await request
+        const tools = (capture.body.tools as Array<{ function?: { name?: string } }> | undefined) ?? []
+        const names = tools.map((item) => item.function?.name)
+        expect(names).not.toContain("task")
+        expect(names).not.toContain("Task")
+        expect(names).not.toContain("Agent")
       },
     })
   })

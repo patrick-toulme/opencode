@@ -13,6 +13,8 @@ import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import { Permission } from "@/permission"
+import { AgentMemory, memoryScope } from "@/memory/agent"
+import { TeamMemory } from "@/memory/team"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@opencode-ai/core/global"
 import path from "path"
@@ -31,6 +33,9 @@ export const Info = Schema.Struct({
   mode: Schema.Literals(["subagent", "primary", "all"]),
   native: Schema.optional(Schema.Boolean),
   hidden: Schema.optional(Schema.Boolean),
+  memory: Schema.optional(Schema.Literals(["user", "project", "local"])),
+  background: Schema.optional(Schema.Boolean),
+  isolation: Schema.optional(Schema.Literals(["worktree", "remote"])),
   topP: Schema.optional(Schema.Finite),
   temperature: Schema.optional(Schema.Finite),
   color: Schema.optional(Schema.String),
@@ -43,6 +48,7 @@ export const Info = Schema.Struct({
   ),
   variant: Schema.optional(Schema.String),
   prompt: Schema.optional(Schema.String),
+  initialPrompt: Schema.optional(Schema.String),
   options: Schema.Record(Schema.String, Schema.Unknown),
   steps: Schema.optional(Schema.Finite),
 })
@@ -252,12 +258,16 @@ export const layer = Layer.effect(
           if (value.model) item.model = Provider.parseModel(value.model)
           item.variant = value.variant ?? item.variant
           item.prompt = value.prompt ?? item.prompt
+          item.initialPrompt = value.initial_prompt ?? value.initialPrompt ?? item.initialPrompt
           item.description = value.description ?? item.description
           item.temperature = value.temperature ?? item.temperature
           item.topP = value.top_p ?? item.topP
           item.mode = value.mode ?? item.mode
           item.color = value.color ?? item.color
           item.hidden = value.hidden ?? item.hidden
+          item.memory = value.memory ?? item.memory
+          item.background = value.background ?? item.background
+          item.isolation = value.isolation ?? item.isolation
           item.name = value.name ?? item.name
           item.steps = value.steps ?? item.steps
           item.options = mergeDeep(item.options, value.options ?? {})
@@ -277,6 +287,25 @@ export const layer = Layer.effect(
           agents[name].permission = Permission.merge(
             agents[name].permission,
             Permission.fromConfig({ external_directory: { [Truncate.GLOB]: "allow" } }),
+          )
+        }
+
+        for (const name in agents) {
+          const agent = agents[name]
+          const scope = memoryScope(agent)
+          if (!scope) continue
+          const memoryDir = AgentMemory.pathsForContext(ctx, agent.name, scope).directory
+          agent.permission = Permission.merge(
+            agent.permission,
+            Permission.fromConfig({ external_directory: { [path.join(memoryDir, "*")]: "allow" } }),
+          )
+        }
+
+        const teamMemoryDir = TeamMemory.pathsForContext(ctx).directory
+        for (const name in agents) {
+          agents[name].permission = Permission.merge(
+            agents[name].permission,
+            Permission.fromConfig({ external_directory: { [path.join(teamMemoryDir, "*")]: "allow" } }),
           )
         }
 

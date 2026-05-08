@@ -381,6 +381,19 @@ export type CompactionPart = {
   auto: boolean
 }
 
+export type BtwPart = {
+  id: string
+  sessionID: string
+  messageID: string
+  type: "btw"
+  childSessionID: string
+  prompt: string
+  time: {
+    created: number
+  }
+  afterMessageID?: string
+}
+
 export type Part =
   | TextPart
   | {
@@ -392,6 +405,7 @@ export type Part =
       description: string
       agent: string
     }
+  | BtwPart
   | ReasoningPart
   | FilePart
   | ToolPart
@@ -1442,6 +1456,17 @@ export type SubtaskPartInput = {
   prompt: string
   description: string
   agent: string
+}
+
+export type BtwPartInput = {
+  id?: string
+  type: "btw"
+  childSessionID: string
+  prompt: string
+  time: {
+    created: number
+  }
+  afterMessageID?: string
 }
 
 export type Command = {
@@ -2595,7 +2620,7 @@ export type SessionPromptData = {
     tools?: {
       [key: string]: boolean
     }
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | BtwPartInput>
   }
   path: {
     /**
@@ -2690,7 +2715,7 @@ export type SessionPromptAsyncData = {
     tools?: {
       [key: string]: boolean
     }
-    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput>
+    parts: Array<TextPartInput | FilePartInput | AgentPartInput | SubtaskPartInput | BtwPartInput>
   }
   path: {
     /**

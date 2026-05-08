@@ -2,6 +2,7 @@ import { NodeFileSystem } from "@effect/platform-node"
 import { FetchHttpClient } from "effect/unstable/http"
 import { expect } from "bun:test"
 import { Cause, Effect, Exit, Fiber, Layer } from "effect"
+import fs from "fs/promises"
 import path from "path"
 import { fileURLToPath } from "url"
 import { NamedError } from "@opencode-ai/core/util/error"
@@ -12,6 +13,7 @@ import { Config } from "@/config/config"
 import { LSP } from "@/lsp/lsp"
 import { MCP } from "../../src/mcp"
 import { Permission } from "../../src/permission"
+import { PermissionID } from "../../src/permission/schema"
 import { Plugin } from "../../src/plugin"
 import { Provider as ProviderSvc } from "@/provider/provider"
 import { Env } from "../../src/env"
@@ -33,11 +35,16 @@ import { SessionRunState } from "../../src/session/run-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { SessionV2 } from "../../src/v2/session"
+import { InstanceState } from "@/effect/instance-state"
 import { Skill } from "../../src/skill"
 import { SystemPrompt } from "../../src/session/system"
 import { Shell } from "../../src/shell/shell"
 import { Snapshot } from "../../src/snapshot"
 import { ToolRegistry } from "@/tool/registry"
+import { SwarmRuntime } from "@/swarm/runtime"
+import { ScheduledTask } from "@/schedule/runtime"
+import { AgentMemory } from "@/memory/agent"
+import { TeamMemory } from "@/memory/team"
 import { Truncate } from "@/tool/truncate"
 import * as Log from "@opencode-ai/core/util/log"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -174,12 +181,22 @@ function makeHttp() {
   ).pipe(Layer.provideMerge(infra))
   const question = Question.layer.pipe(Layer.provideMerge(deps))
   const todo = Todo.layer.pipe(Layer.provideMerge(deps))
+  const swarm = SwarmRuntime.defaultLayer
+  const scheduled = ScheduledTask.layer.pipe(
+    Layer.provideMerge(AppFileSystem.defaultLayer),
+    Layer.provideMerge(Bus.layer),
+    Layer.provideMerge(swarm),
+  )
+  const agentMemory = AgentMemory.layer.pipe(Layer.provideMerge(AppFileSystem.defaultLayer))
+  const teamMemory = TeamMemory.layer.pipe(Layer.provideMerge(AppFileSystem.defaultLayer), Layer.provideMerge(deps))
   const registry = ToolRegistry.layer.pipe(
     Layer.provide(Skill.defaultLayer),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(CrossSpawnSpawner.defaultLayer),
     Layer.provide(Ripgrep.defaultLayer),
     Layer.provide(Format.defaultLayer),
+    Layer.provideMerge(swarm),
+    Layer.provideMerge(scheduled),
     Layer.provideMerge(todo),
     Layer.provideMerge(question),
     Layer.provideMerge(deps),
@@ -189,6 +206,10 @@ function makeHttp() {
   const compact = SessionCompaction.layer.pipe(Layer.provideMerge(proc), Layer.provideMerge(deps))
   return Layer.mergeAll(
     TestLLMServer.layer,
+    swarm,
+    scheduled,
+    agentMemory,
+    teamMemory,
     SessionPrompt.layer.pipe(
       Layer.provide(SessionRevert.defaultLayer),
       Layer.provide(summary),
@@ -197,6 +218,10 @@ function makeHttp() {
       Layer.provideMerge(proc),
       Layer.provideMerge(registry),
       Layer.provideMerge(trunc),
+      Layer.provideMerge(swarm),
+      Layer.provideMerge(scheduled),
+      Layer.provideMerge(agentMemory),
+      Layer.provideMerge(teamMemory),
       Layer.provide(Instruction.defaultLayer),
       Layer.provide(SystemPrompt.defaultLayer),
       Layer.provideMerge(deps),
@@ -374,6 +399,117 @@ it.live("loop calls LLM and returns assistant message", () =>
   ),
 )
 
+it.live("can mask tools for one prompt turn without persisting session permissions", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Pinned" })
+
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        tools: { bash: false, edit: false },
+        persistToolPermissions: false,
+        parts: [{ type: "text", text: "inspect only" }],
+      })
+
+      const fresh = yield* sessions.get(chat.id)
+      expect(fresh.permission).toBeUndefined()
+      const messages = yield* sessions.messages({ sessionID: chat.id })
+      const lastUser = messages.findLast((message) => message.info.role === "user")
+      expect(lastUser?.info.role === "user" ? lastUser.info.tools : undefined).toEqual({
+        bash: false,
+        edit: false,
+      })
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("loop responds in btw child when the client preallocated the prompt id before cloning", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: parent.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "hello" }],
+      })
+      yield* llm.text("parent response")
+      yield* prompt.loop({ sessionID: parent.id })
+
+      const preallocated = MessageID.ascending()
+      const child = yield* sessions.btw({ sessionID: parent.id })
+      yield* prompt.prompt({
+        sessionID: child.id,
+        messageID: preallocated,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "child question" }],
+      })
+      yield* llm.text("child response")
+
+      const result = yield* prompt.loop({ sessionID: child.id })
+      expect(result.info.role).toBe("assistant")
+      const parts = result.parts.filter((p) => p.type === "text")
+      expect(parts.some((p) => p.type === "text" && p.text === "child response")).toBe(true)
+      expect(yield* llm.hits).toHaveLength(2)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("loop ignores inline btw markers in the parent session", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: parent.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "hello" }],
+      })
+      yield* llm.text("parent response")
+      const parentResponse = yield* prompt.loop({ sessionID: parent.id })
+      const child = yield* sessions.btw({ sessionID: parent.id })
+      const childMessages = yield* sessions.messages({ sessionID: child.id })
+
+      yield* prompt.prompt({
+        sessionID: parent.id,
+        agent: "build",
+        noReply: true,
+        parts: [
+          {
+            type: "btw",
+            childSessionID: child.id,
+            prompt: "side question",
+            time: { created: Date.now() },
+            afterMessageID: childMessages.at(-1)?.info.id,
+          },
+        ],
+      })
+
+      const result = yield* prompt.loop({ sessionID: parent.id })
+      expect(result.info.id).toBe(parentResponse.info.id)
+      expect(yield* llm.hits).toHaveLength(1)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
 it.live("prompt emits v2 prompted and synthetic events", () =>
   provideTmpdirServer(
     Effect.fnUntraced(function* () {
@@ -512,6 +648,255 @@ it.live("loop continues when finish is tool-calls", () =>
         expect(result.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
         expect(result.info.finish).toBe("stop")
       }
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("worker permission requests are surfaced to the parent session", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const swarm = yield* SwarmRuntime.Service
+      const permissions = yield* Permission.Service
+      const parent = yield* sessions.create({ title: "Parent" })
+      const child = yield* sessions.create({
+        parentID: parent.id,
+        title: "Worker",
+        permission: [{ permission: "bash", pattern: "*", action: "ask" }],
+      })
+      const worker = yield* swarm.spawn({
+        parentSessionID: parent.id,
+        sessionID: child.id,
+        agent: "general",
+        name: "needs-permission",
+        team: "red",
+        prompt: "run git status",
+        description: "permission worker",
+        wait: false,
+        executionStrategy: "persistent",
+        run: Effect.never,
+      })
+
+      yield* llm.tool("bash", {
+        command: "git status --short",
+        description: "Check status",
+      })
+      yield* llm.text("done")
+
+      const run = yield* prompt
+        .prompt({
+          sessionID: child.id,
+          agent: "general",
+          parts: [{ type: "text", text: "run git status" }],
+        })
+        .pipe(Effect.forkScoped)
+
+      let requestID: string | undefined
+      let delivered: MessageV2.TextPart | undefined
+      for (let i = 0; i < 100 && !delivered; i++) {
+        requestID = (yield* permissions.list())[0]?.id as unknown as string | undefined
+        const parentMessages = yield* MessageV2.filterCompactedEffect(parent.id)
+        delivered = parentMessages
+          .flatMap((message) => message.parts)
+          .find(
+            (part): part is MessageV2.TextPart =>
+              part.type === "text" &&
+              part.synthetic === true &&
+              part.metadata?.kind === "swarm-message" &&
+              part.text.includes("permission_request"),
+          )
+        if (!delivered) yield* Effect.sleep("10 millis")
+      }
+
+      expect(requestID).toBeDefined()
+      expect(delivered?.text).toContain("<from>needs-permission</from>")
+      expect(delivered?.text).toContain("permission_request")
+      expect(delivered?.text).toContain("git status --short")
+
+      yield* permissions.reply({ requestID: PermissionID.make(requestID!), reply: "once" })
+      const result = yield* Fiber.join(run)
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "done")).toBe(true)
+
+      yield* swarm.cancel(worker.workerID)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("prompt includes live swarm context for parent sessions", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const swarm = yield* SwarmRuntime.Service
+      const scheduled = yield* ScheduledTask.Service
+      const parent = yield* sessions.create({
+        title: "Parent",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const child = yield* sessions.create({ parentID: parent.id, title: "Worker" })
+      const worker = yield* swarm.spawn({
+        parentSessionID: parent.id,
+        sessionID: child.id,
+        agent: "general",
+        name: "reviewer",
+        team: "red",
+        prompt: "review",
+        description: "review worker",
+        wait: false,
+        executionStrategy: "persistent",
+        run: Effect.never,
+      })
+      yield* swarm.updateProgress(worker.workerID, "assigned task #1")
+      yield* swarm.recordResult(worker.workerID, { status: "completed", text: "review found flaky test ownership" })
+      yield* swarm.updateCurrentTool(worker.workerID, { name: "bash", title: "bun test" })
+      yield* swarm.requestPlanApproval(worker.workerID, "plan_review")
+      const stoppedChild = yield* sessions.create({ parentID: parent.id, title: "Stopped worker" })
+      yield* swarm.spawn({
+        parentSessionID: parent.id,
+        sessionID: stoppedChild.id,
+        agent: "general",
+        name: "retired",
+        prompt: "old review",
+        description: "retired worker",
+        wait: true,
+        executionStrategy: "persistent",
+        run: Effect.succeed({ status: "cancelled" as const, text: "old branch analysis" }),
+      })
+      yield* swarm.createTask({
+        parentSessionID: parent.id,
+        team: "red",
+        subject: "Run tests",
+        description: "Run regression tests",
+        owner: "reviewer",
+      })
+      yield* scheduled.create({
+        sessionID: parent.id,
+        parentSessionID: parent.id,
+        agent: "build",
+        cron: "*/5 * * * *",
+        prompt: "check whether reviewer needs help",
+      })
+      yield* prompt.prompt({
+        sessionID: parent.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "What is the team doing?" }],
+      })
+      yield* llm.text("The reviewer is assigned tests.")
+
+      yield* prompt.loop({ sessionID: parent.id })
+      const inputs = yield* llm.inputs
+      const request = inputs.at(-1) as { messages: Array<{ role: string; content: unknown }> } | undefined
+      const body = String(request?.messages.find((msg) => msg.role === "system")?.content)
+      expect(body).toContain("<swarm-runtime>")
+      expect(body).toContain("<active-subagents count=\"1\">")
+      expect(body).toContain("<name>reviewer</name>")
+      expect(body).toContain("<current-tool>bash: bun test</current-tool>")
+      expect(body).toContain("<pending-plan-approval-id>plan_review</pending-plan-approval-id>")
+      expect(body).toContain("<last-result>review found flaky test ownership</last-result>")
+      expect(body).toContain("<stopped-subagents count=\"1\">")
+      expect(body).toContain("<name>retired</name>")
+      expect(body).toContain("Plain text sent with send_message resumes a stopped subagent")
+      expect(body).toContain("<open-team-tasks count=\"1\">")
+      expect(body).toContain("<subject>Run tests</subject>")
+      expect(body).toContain("<description>Run regression tests</description>")
+      expect(body).toContain("<scheduled-tasks count=\"1\">")
+      expect(body).toContain("<prompt>check whether reviewer needs help</prompt>")
+
+      yield* swarm.cancel(worker.workerID)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("prompt includes persistent agent memory when enabled", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const ctx = yield* InstanceState.context
+      const root = ctx.worktree === "/" ? ctx.directory : ctx.worktree
+      const memoryDir = path.join(root, ".opencode", "agent-memory", "build")
+      yield* Effect.promise(() => fs.mkdir(memoryDir, { recursive: true }))
+      yield* Effect.promise(() =>
+        Bun.write(path.join(memoryDir, "MEMORY.md"), "- Prefer focused swarm summaries over raw transcripts.\n"),
+      )
+
+      const session = yield* sessions.create({
+        title: "Memory",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "Use memory if relevant." }],
+      })
+      yield* llm.text("I will use the saved preference.")
+
+      yield* prompt.loop({ sessionID: session.id })
+      const inputs = yield* llm.inputs
+      const request = inputs.at(-1) as { messages: Array<{ role: string; content: unknown }> } | undefined
+      const systemBody = request?.messages
+        .filter((msg) => msg.role === "system")
+        .map((msg) => String(msg.content))
+        .join("\n")
+      expect(systemBody).toContain("# Persistent Agent Memory")
+      expect(systemBody).toContain("Scope: project")
+      expect(systemBody).toContain("Prefer focused swarm summaries over raw transcripts")
+    }),
+    {
+      git: true,
+      config: (url) => ({
+        ...providerCfg(url),
+        agent: {
+          build: {
+            memory: "project",
+          },
+        },
+      }),
+    },
+  ),
+)
+
+it.live("prompt includes shared team memory when a team MEMORY.md exists", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const ctx = yield* InstanceState.context
+      const memory = TeamMemory.pathsForContext(ctx)
+      yield* Effect.promise(() => fs.mkdir(memory.directory, { recursive: true }))
+      yield* Effect.promise(() =>
+        Bun.write(memory.entrypoint, "- Prefer team task handoffs over isolated final summaries.\n"),
+      )
+
+      const session = yield* sessions.create({
+        title: "Team Memory",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "Use team memory if relevant." }],
+      })
+      yield* llm.text("I will use the shared memory.")
+
+      yield* prompt.loop({ sessionID: session.id })
+      const inputs = yield* llm.inputs
+      const request = inputs.at(-1) as { messages: Array<{ role: string; content: unknown }> } | undefined
+      const systemBody = request?.messages
+        .filter((msg) => msg.role === "system")
+        .map((msg) => String(msg.content))
+        .join("\n")
+      expect(systemBody).toContain("# Shared Team Memory")
+      expect(systemBody).toContain(memory.entrypoint)
+      expect(systemBody).toContain("Prefer team task handoffs over isolated final summaries")
     }),
     { git: true, config: providerCfg },
   ),

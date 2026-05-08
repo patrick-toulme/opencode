@@ -39,6 +39,7 @@ import { SessionShare } from "@/share/session"
 import { ShareNext } from "@/share/share-next"
 import { Skill } from "@/skill"
 import { Snapshot } from "@/snapshot"
+import { SwarmRuntime } from "@/swarm/runtime"
 import { SyncEvent } from "@/sync"
 import { ToolRegistry } from "@/tool/registry"
 import { lazy } from "@/util/lazy"
@@ -64,6 +65,7 @@ import { providerHandlers } from "./handlers/provider"
 import { ptyConnectRoute, ptyHandlers } from "./handlers/pty"
 import { questionHandlers } from "./handlers/question"
 import { sessionHandlers } from "./handlers/session"
+import { swarmHandlers } from "./handlers/swarm"
 import { syncHandlers } from "./handlers/sync"
 import { tuiHandlers } from "./handlers/tui"
 import { v2Handlers } from "./handlers/v2"
@@ -118,6 +120,7 @@ const instanceApiRoutes = HttpApiBuilder.layer(InstanceHttpApi).pipe(
     permissionHandlers,
     providerHandlers,
     sessionHandlers,
+    swarmHandlers,
     syncHandlers,
     v2Handlers,
     tuiHandlers,
@@ -179,6 +182,7 @@ export function createRoutes(corsOptions?: CorsOptions) {
       SessionSummary.defaultLayer,
       ShareNext.defaultLayer,
       Snapshot.defaultLayer,
+      SwarmRuntime.defaultLayer,
       SyncEvent.defaultLayer,
       Skill.defaultLayer,
       Todo.defaultLayer,

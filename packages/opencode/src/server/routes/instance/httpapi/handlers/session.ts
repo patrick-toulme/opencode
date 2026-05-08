@@ -27,6 +27,8 @@ import {
   CommandPayload,
   DiffQuery,
   ForkPayload,
+  GoalSetPayload,
+  GoalUpdatePayload,
   InitPayload,
   ListQuery,
   MessagesQuery,
@@ -194,9 +196,42 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       )
     })
 
+    const btw = Effect.fn("SessionHttpApi.btw")(function* (ctx: { params: { sessionID: SessionID } }) {
+      return yield* SessionError.mapStorageNotFound(session.btw({ sessionID: ctx.params.sessionID }))
+    })
+
     const abort = Effect.fn("SessionHttpApi.abort")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* promptSvc.cancel(ctx.params.sessionID)
       return true
+    })
+
+    const goalSet = Effect.fn("SessionHttpApi.goalSet")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof GoalSetPayload.Type
+    }) {
+      yield* SessionError.mapStorageNotFound(
+        session.setGoal({
+          sessionID: ctx.params.sessionID,
+          objective: ctx.payload.objective,
+          tokenBudget: ctx.payload.tokenBudget,
+        }),
+      )
+      return yield* SessionError.mapStorageNotFound(session.get(ctx.params.sessionID))
+    })
+
+    const goalUpdate = Effect.fn("SessionHttpApi.goalUpdate")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof GoalUpdatePayload.Type
+    }) {
+      yield* SessionError.mapStorageNotFound(
+        session.updateGoalStatus({ sessionID: ctx.params.sessionID, status: ctx.payload.status }),
+      )
+      return yield* SessionError.mapStorageNotFound(session.get(ctx.params.sessionID))
+    })
+
+    const goalClear = Effect.fn("SessionHttpApi.goalClear")(function* (ctx: { params: { sessionID: SessionID } }) {
+      yield* session.clearGoal(ctx.params.sessionID)
+      return yield* SessionError.mapStorageNotFound(session.get(ctx.params.sessionID))
     })
 
     const init = Effect.fn("SessionHttpApi.init")(function* (ctx: {
@@ -364,7 +399,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("remove", remove)
       .handle("update", update)
       .handle("fork", fork)
+      .handle("btw", btw)
       .handle("abort", abort)
+      .handle("goalSet", goalSet)
+      .handle("goalUpdate", goalUpdate)
+      .handle("goalClear", goalClear)
       .handle("init", init)
       .handle("share", share)
       .handle("unshare", unshare)

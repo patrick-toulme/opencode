@@ -249,6 +249,10 @@ export const GlobalRoutes = lazy(() =>
         const result = await AppRuntime.runPromise(
           Installation.Service.use((svc) =>
             Effect.gen(function* () {
+              if (Installation.isOpenCodeMAX()) {
+                return { success: false as const, status: 400 as const, error: Installation.OpenCodeMAXUpgradeMessage }
+              }
+
               const method = yield* svc.method()
               if (method === "unknown") {
                 return { success: false as const, status: 400 as const, error: "Unknown installation method" }

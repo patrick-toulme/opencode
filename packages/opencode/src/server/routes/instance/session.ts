@@ -417,6 +417,37 @@ export const SessionRoutes = lazy(() =>
         }),
     )
     .post(
+      "/:sessionID/btw",
+      describeRoute({
+        summary: "Btw session",
+        description:
+          "Open a side-thread that inherits the parent session's full message history without modifying the parent.",
+        operationId: "session.btw",
+        responses: {
+          200: {
+            description: "200",
+            content: {
+              "application/json": {
+                schema: resolver(Session.Info.zod),
+              },
+            },
+          },
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      async (c) =>
+        jsonRequest("SessionRoutes.btw", c, function* () {
+          const sessionID = c.req.valid("param").sessionID
+          const svc = yield* Session.Service
+          return yield* svc.btw({ sessionID })
+        }),
+    )
+    .post(
       "/:sessionID/abort",
       describeRoute({
         summary: "Abort session",
@@ -445,6 +476,119 @@ export const SessionRoutes = lazy(() =>
           const svc = yield* SessionPrompt.Service
           yield* svc.cancel(c.req.valid("param").sessionID)
           return true
+        }),
+    )
+    .put(
+      "/:sessionID/goal",
+      describeRoute({
+        summary: "Set goal",
+        description:
+          "Attach a long-term goal to the session. The goal is re-injected into the model's system prompt every turn until cleared or marked complete.",
+        operationId: "session.goal.set",
+        responses: {
+          200: {
+            description: "Updated session",
+            content: {
+              "application/json": {
+                schema: resolver(Session.Info.zod),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      validator(
+        "json",
+        z.object({
+          objective: z.string().min(1),
+          tokenBudget: z.number().int().nonnegative().optional(),
+        }),
+      ),
+      async (c) =>
+        jsonRequest("SessionRoutes.goal.set", c, function* () {
+          const sessionID = c.req.valid("param").sessionID
+          const body = c.req.valid("json")
+          const svc = yield* Session.Service
+          yield* svc.setGoal({ sessionID, objective: body.objective, tokenBudget: body.tokenBudget })
+          return yield* svc.get(sessionID)
+        }),
+    )
+    .patch(
+      "/:sessionID/goal",
+      describeRoute({
+        summary: "Update goal status",
+        description:
+          "Pause, resume, or mark complete the long-term goal attached to this session. Use the PUT endpoint to change the objective itself.",
+        operationId: "session.goal.update",
+        responses: {
+          200: {
+            description: "Updated session",
+            content: {
+              "application/json": {
+                schema: resolver(Session.Info.zod),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      validator(
+        "json",
+        z.object({
+          status: z.enum(["active", "paused", "complete"]),
+        }),
+      ),
+      async (c) =>
+        jsonRequest("SessionRoutes.goal.update", c, function* () {
+          const sessionID = c.req.valid("param").sessionID
+          const body = c.req.valid("json")
+          const svc = yield* Session.Service
+          yield* svc.updateGoalStatus({ sessionID, status: body.status })
+          return yield* svc.get(sessionID)
+        }),
+    )
+    .delete(
+      "/:sessionID/goal",
+      describeRoute({
+        summary: "Clear goal",
+        description: "Detach the long-term goal from this session.",
+        operationId: "session.goal.clear",
+        responses: {
+          200: {
+            description: "Updated session",
+            content: {
+              "application/json": {
+                schema: resolver(Session.Info.zod),
+              },
+            },
+          },
+          ...errors(400, 404),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          sessionID: SessionID.zod,
+        }),
+      ),
+      async (c) =>
+        jsonRequest("SessionRoutes.goal.clear", c, function* () {
+          const sessionID = c.req.valid("param").sessionID
+          const svc = yield* Session.Service
+          yield* svc.clearGoal(sessionID)
+          return yield* svc.get(sessionID)
         }),
     )
     .post(

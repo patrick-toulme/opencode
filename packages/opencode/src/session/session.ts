@@ -69,6 +69,7 @@ export function fromRow(row: SessionRow): Info {
       : undefined
   const share = row.share_url ? { url: row.share_url } : undefined
   const revert = row.revert ?? undefined
+  const goal = row.goal ?? undefined
   return {
     id: row.id,
     slug: row.slug,
@@ -91,6 +92,7 @@ export function fromRow(row: SessionRow): Info {
     share,
     revert,
     permission: row.permission ?? undefined,
+    goal,
     time: {
       created: row.time_created,
       updated: row.time_updated,
@@ -120,6 +122,7 @@ export function toRow(info: Info) {
     summary_diffs: info.summary?.diffs,
     revert: info.revert ?? null,
     permission: info.permission,
+    goal: info.goal ?? null,
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
@@ -135,6 +138,17 @@ function getForkedTitle(title: string): string {
     return `${base} (fork #${num + 1})`
   }
   return `${title} (fork #1)`
+}
+
+const btwTitlePrefix = "btw: "
+
+export function isBtwTitle(title: string) {
+  return title.startsWith(btwTitlePrefix)
+}
+
+function getBtwTitle(parentTitle: string) {
+  const base = isDefaultTitle(parentTitle) ? "thread" : parentTitle
+  return btwTitlePrefix + base
 }
 
 function sessionPath(worktree: string, cwd: string) {
@@ -176,6 +190,20 @@ const Model = Schema.Struct({
   variant: optionalOmitUndefined(Schema.String),
 })
 
+export const GoalStatus = Schema.Literals(["active", "paused", "budget_limited", "complete"])
+export type GoalStatus = Schema.Schema.Type<typeof GoalStatus>
+
+export const Goal = Schema.Struct({
+  objective: Schema.String,
+  status: GoalStatus,
+  tokenBudget: optionalOmitUndefined(NonNegativeInt),
+  tokensUsed: NonNegativeInt,
+  timeUsedMs: NonNegativeInt,
+  timeCreated: NonNegativeInt,
+  timeUpdated: NonNegativeInt,
+})
+export type Goal = Schema.Schema.Type<typeof Goal>
+
 export const Info = Schema.Struct({
   id: SessionID,
   slug: Schema.String,
@@ -193,6 +221,7 @@ export const Info = Schema.Struct({
   time: Time,
   permission: optionalOmitUndefined(Permission.Ruleset),
   revert: optionalOmitUndefined(Revert),
+  goal: optionalOmitUndefined(Goal),
 })
   .annotate({ identifier: "Session" })
   .pipe(withStatics((s) => ({ zod: zod(s) })))
@@ -231,6 +260,9 @@ export const ForkInput = Schema.Struct({
   sessionID: SessionID,
   messageID: Schema.optional(MessageID),
 }).pipe(withStatics((s) => ({ zod: zod(s) })))
+export const BtwInput = Schema.Struct({
+  sessionID: SessionID,
+}).pipe(withStatics((s) => ({ zod: zod(s) })))
 export const GetInput = SessionID
 export const ChildrenInput = SessionID
 export const RemoveInput = SessionID
@@ -249,6 +281,20 @@ export const SetRevertInput = Schema.Struct({
   sessionID: SessionID,
   revert: Schema.optional(Revert),
   summary: Schema.optional(Summary),
+}).pipe(withStatics((s) => ({ zod: zod(s) })))
+export const SetGoalInput = Schema.Struct({
+  sessionID: SessionID,
+  objective: Schema.String,
+  tokenBudget: Schema.optional(NonNegativeInt),
+}).pipe(withStatics((s) => ({ zod: zod(s) })))
+export const SetGoalStatusInput = Schema.Struct({
+  sessionID: SessionID,
+  status: GoalStatus,
+}).pipe(withStatics((s) => ({ zod: zod(s) })))
+export const TrackGoalUsageInput = Schema.Struct({
+  sessionID: SessionID,
+  tokens: NonNegativeInt,
+  timeMs: NonNegativeInt,
 }).pipe(withStatics((s) => ({ zod: zod(s) })))
 export const MessagesInput = Schema.Struct({
   sessionID: SessionID,
@@ -298,6 +344,7 @@ const UpdatedInfo = Schema.Struct({
   time: Schema.optional(UpdatedTime),
   permission: Schema.optional(Schema.NullOr(Permission.Ruleset)),
   revert: Schema.optional(Schema.NullOr(Revert)),
+  goal: Schema.optional(Schema.NullOr(Goal)),
 })
 
 const UpdatedEventSchema = Schema.Struct({
@@ -434,6 +481,7 @@ export interface Interface {
     workspaceID?: WorkspaceID
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
+  readonly btw: (input: { sessionID: SessionID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
@@ -445,6 +493,18 @@ export interface Interface {
     summary: Info["summary"]
   }) => Effect.Effect<void>
   readonly clearRevert: (sessionID: SessionID) => Effect.Effect<void>
+  readonly setGoal: (input: {
+    sessionID: SessionID
+    objective: string
+    tokenBudget?: number
+  }) => Effect.Effect<Goal, NotFound>
+  readonly updateGoalStatus: (input: { sessionID: SessionID; status: GoalStatus }) => Effect.Effect<Goal, NotFound>
+  readonly clearGoal: (sessionID: SessionID) => Effect.Effect<void>
+  readonly trackGoalUsage: (input: {
+    sessionID: SessionID
+    tokens: number
+    timeMs: number
+  }) => Effect.Effect<Goal | undefined>
   readonly setSummary: (input: { sessionID: SessionID; summary: Info["summary"] }) => Effect.Effect<void>
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
   readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<MessageV2.WithParts[]>
@@ -640,6 +700,45 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       })
     })
 
+    const copyMessages = Effect.fn("Session.copyMessages")(function* (input: {
+      from: SessionID
+      to: SessionID
+      until?: MessageID
+    }) {
+      const msgs = yield* messages({ sessionID: input.from })
+      const idMap = new Map<string, MessageID>()
+
+      for (const msg of msgs) {
+        if (input.until && msg.info.id >= input.until) break
+        const parts = msg.parts.filter((part) => part.type !== "btw")
+        if (msg.info.role === "user" && parts.length === 0) continue
+
+        const newID = MessageID.ascending()
+        idMap.set(msg.info.id, newID)
+
+        const parentID = msg.info.role === "assistant" && msg.info.parentID ? idMap.get(msg.info.parentID) : undefined
+        const cloned = yield* updateMessage({
+          ...msg.info,
+          sessionID: input.to,
+          id: newID,
+          ...(parentID && { parentID }),
+        })
+
+        for (const part of parts) {
+          const p: MessageV2.Part = {
+            ...part,
+            id: PartID.ascending(),
+            messageID: cloned.id,
+            sessionID: input.to,
+          }
+          if (p.type === "compaction" && p.tail_start_id) {
+            p.tail_start_id = idMap.get(p.tail_start_id)
+          }
+          yield* updatePart(p)
+        }
+      }
+    })
+
     const fork = Effect.fn("Session.fork")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
       const ctx = yield* InstanceState.context
       const original = yield* get(input.sessionID)
@@ -650,35 +749,24 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
         workspaceID: original.workspaceID,
         title,
       })
-      const msgs = yield* messages({ sessionID: input.sessionID })
-      const idMap = new Map<string, MessageID>()
+      yield* copyMessages({ from: input.sessionID, to: session.id, until: input.messageID })
+      return session
+    })
 
-      for (const msg of msgs) {
-        if (input.messageID && msg.info.id >= input.messageID) break
-        const newID = MessageID.ascending()
-        idMap.set(msg.info.id, newID)
-
-        const parentID = msg.info.role === "assistant" && msg.info.parentID ? idMap.get(msg.info.parentID) : undefined
-        const cloned = yield* updateMessage({
-          ...msg.info,
-          sessionID: session.id,
-          id: newID,
-          ...(parentID && { parentID }),
-        })
-
-        for (const part of msg.parts) {
-          const p: MessageV2.Part = {
-            ...part,
-            id: PartID.ascending(),
-            messageID: cloned.id,
-            sessionID: session.id,
-          }
-          if (p.type === "compaction" && p.tail_start_id) {
-            p.tail_start_id = idMap.get(p.tail_start_id)
-          }
-          yield* updatePart(p)
-        }
-      }
+    const btw = Effect.fn("Session.btw")(function* (input: { sessionID: SessionID }) {
+      const ctx = yield* InstanceState.context
+      const original = yield* get(input.sessionID)
+      const session = yield* createNext({
+        directory: ctx.directory,
+        path: sessionPath(ctx.worktree, ctx.directory),
+        workspaceID: original.workspaceID,
+        parentID: original.id,
+        title: getBtwTitle(original.title),
+        agent: original.agent,
+        model: original.model,
+        permission: original.permission,
+      })
+      yield* copyMessages({ from: input.sessionID, to: session.id })
       return session
     })
 
@@ -720,6 +808,65 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       summary: Info["summary"]
     }) {
       yield* patch(input.sessionID, { time: { updated: Date.now() }, summary: input.summary })
+    })
+
+    const setGoal = Effect.fn("Session.setGoal")(function* (input: {
+      sessionID: SessionID
+      objective: string
+      tokenBudget?: number
+    }) {
+      const session = yield* get(input.sessionID)
+      const now = Date.now()
+      const goal: Goal = {
+        objective: input.objective,
+        status: "active",
+        ...(input.tokenBudget !== undefined ? { tokenBudget: input.tokenBudget } : {}),
+        tokensUsed: session.goal?.tokensUsed ?? 0,
+        timeUsedMs: session.goal?.timeUsedMs ?? 0,
+        timeCreated: session.goal?.timeCreated ?? now,
+        timeUpdated: now,
+      }
+      yield* patch(input.sessionID, { goal, time: { updated: now } })
+      return goal
+    })
+
+    const updateGoalStatus = Effect.fn("Session.updateGoalStatus")(function* (input: {
+      sessionID: SessionID
+      status: GoalStatus
+    }) {
+      const session = yield* get(input.sessionID)
+      if (!session.goal) {
+        return yield* Effect.fail(new NotFoundError({ message: `Session has no goal: ${input.sessionID}` }))
+      }
+      const now = Date.now()
+      const goal: Goal = { ...session.goal, status: input.status, timeUpdated: now }
+      yield* patch(input.sessionID, { goal, time: { updated: now } })
+      return goal
+    })
+
+    const clearGoal = Effect.fn("Session.clearGoal")(function* (sessionID: SessionID) {
+      yield* patch(sessionID, { goal: null, time: { updated: Date.now() } })
+    })
+
+    const trackGoalUsage = Effect.fn("Session.trackGoalUsage")(function* (input: {
+      sessionID: SessionID
+      tokens: number
+      timeMs: number
+    }) {
+      const session = yield* get(input.sessionID).pipe(Effect.option)
+      const current = session._tag === "Some" ? session.value.goal : undefined
+      if (!current) return undefined
+      const now = Date.now()
+      const tokensUsed = current.tokensUsed + Math.max(0, input.tokens)
+      const timeUsedMs = current.timeUsedMs + Math.max(0, input.timeMs)
+      // Once a goal is paused/complete the user has decided how it ends —
+      // keep the meter accurate but don't flip the state out from under them.
+      const hitBudget =
+        current.status === "active" && current.tokenBudget !== undefined && tokensUsed >= current.tokenBudget
+      const status: GoalStatus = hitBudget ? "budget_limited" : current.status
+      const goal: Goal = { ...current, status, tokensUsed, timeUsedMs, timeUpdated: now }
+      yield* patch(input.sessionID, { goal, time: { updated: now } })
+      return goal
     })
 
     const diff = Effect.fn("Session.diff")(function* (sessionID: SessionID) {
@@ -784,6 +931,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       list,
       create,
       fork,
+      btw,
       touch,
       get,
       setTitle,
@@ -791,6 +939,10 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       setPermission,
       setRevert,
       clearRevert,
+      setGoal,
+      updateGoalStatus,
+      clearGoal,
+      trackGoalUsage,
       setSummary,
       diff,
       messages,

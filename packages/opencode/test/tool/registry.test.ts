@@ -23,6 +23,9 @@ import { Format } from "@/format"
 import { Ripgrep } from "@/file/ripgrep"
 import * as Truncate from "@/tool/truncate"
 import { InstanceState } from "@/effect/instance-state"
+import { SwarmRuntime } from "@/swarm/runtime"
+import { ScheduledTask } from "@/schedule/runtime"
+import { Permission } from "@/permission"
 
 const node = CrossSpawnSpawner.defaultLayer
 const configLayer = TestConfig.layer({
@@ -47,6 +50,9 @@ const registryLayer = ToolRegistry.layer.pipe(
   Layer.provide(node),
   Layer.provide(Ripgrep.defaultLayer),
   Layer.provide(Truncate.defaultLayer),
+  Layer.provide(SwarmRuntime.defaultLayer),
+  Layer.provide(ScheduledTask.defaultLayer),
+  Layer.provide(Permission.defaultLayer),
 )
 
 const it = testEffect(Layer.mergeAll(registryLayer, node))

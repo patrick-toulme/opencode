@@ -14,21 +14,38 @@ export function SubagentFooter() {
   const sync = useSync()
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
   const session = createMemo(() => sync.session.get(route.sessionID))
+  const worker = createMemo(() =>
+    Object.values(sync.data.swarm.worker)
+      .flat()
+      .find((item) => item.spec.sessionID === route.sessionID),
+  )
 
   const subagentInfo = createMemo(() => {
+    const w = worker()
+    if (w) {
+      return {
+        label: w.spec.name ? Locale.titlecase(w.spec.name) : Locale.titlecase(w.spec.agent),
+        index: 0,
+        total: 0,
+        team: w.spec.team,
+        status: w.status,
+        currentTool: w.currentTool,
+      }
+    }
+
     const s = session()
-    if (!s) return { label: "Subagent", index: 0, total: 0 }
+    if (!s) return { label: "Subagent", index: 0, total: 0, team: undefined, status: undefined, currentTool: undefined }
     const agentMatch = s.title.match(/@(\w+) subagent/)
     const label = agentMatch ? Locale.titlecase(agentMatch[1]) : "Subagent"
 
-    if (!s.parentID) return { label, index: 0, total: 0 }
+    if (!s.parentID) return { label, index: 0, total: 0, team: undefined, status: undefined, currentTool: undefined }
 
     const siblings = sync.data.session
       .filter((x) => x.parentID === s.parentID)
       .toSorted((a, b) => a.time.created - b.time.created)
     const index = siblings.findIndex((x) => x.id === s.id)
 
-    return { label, index: index + 1, total: siblings.length }
+    return { label, index: index + 1, total: siblings.length, team: undefined, status: undefined, currentTool: undefined }
   })
 
   const usage = createMemo(() => {
@@ -85,6 +102,28 @@ export function SubagentFooter() {
               <text style={{ fg: theme.textMuted }}>
                 ({subagentInfo().index} of {subagentInfo().total})
               </text>
+            </Show>
+            <Show when={subagentInfo().team}>
+              {(team) => (
+                <text fg={theme.textMuted} wrapMode="none">
+                  team {team()}
+                </text>
+              )}
+            </Show>
+            <Show when={subagentInfo().status}>
+              {(status) => (
+                <text fg={status() === "waiting_permission" ? theme.warning : theme.textMuted} wrapMode="none">
+                  {status().replaceAll("_", " ")}
+                </text>
+              )}
+            </Show>
+            <Show when={subagentInfo().currentTool}>
+              {(tool) => (
+                <text fg={theme.textMuted} wrapMode="none">
+                  {Locale.titlecase(tool().name)}
+                  <Show when={tool().title}> {tool().title}</Show>
+                </text>
+              )}
             </Show>
             <Show when={usage()}>
               {(item) => (
